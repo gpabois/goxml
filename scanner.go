@@ -341,6 +341,7 @@ func (l *Scanner) Next() option.Option[result.Result[Token]] {
 	if l.exhausted {
 		return option.None[result.Result[Token]]()
 	}
+
 	for {
 		chRes := l.nextRune()
 		if chRes.HasFailed() {
