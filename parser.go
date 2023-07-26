@@ -12,18 +12,26 @@ import (
 	"github.com/gpabois/gostd/result"
 )
 
+type ParserArgs struct {
+	// Allows to trace the operations of the parser
+	Debug bool
+}
+
 type Parser struct {
 	state    int8
 	scanner  iter.Iterator[result.Result[Token]]
 	document Document
 	stack    collection.Stack[any]
 	tokStack collection.Stack[Token] // Used to rewind token
+	debug    bool
+	logs     []string
 }
 
-func NewParser(r io.Reader) Parser {
+func NewParser(r io.Reader, args ParserArgs) Parser {
 	scanner := NewScanner(r)
 	return Parser{
 		scanner: &scanner,
+		debug:   args.Debug,
 	}
 }
 
@@ -149,38 +157,39 @@ const (
 
 // All parser states
 var parserStates = []parserState{
-	// parseElements
+	//0: parseElements
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
 		case TOK_OPEN_PROCINST: // <?
 			return parserNext(parseProcInstElement).
 				shift().
-				pushValue(Element{Flag: ProcInstFlag}).
+				pushValue(NewElement("", "", ProcInstFlag, []Element{}, []Attribute{})).
 				some()
 		case TOK_OPEN_COMMENT: // <!--
 			return parserNext(parseComment).
 				shift().
-				pushValue(Element{Tag: QName{Local: "#comment"}}).
+				pushValue(NewCommentElement("")).
 				some()
 		case TOK_OPEN_ELEMENT_TAG: // <
 			return parserNext(parseElement).
 				shift().
-				pushValue(Element{}).
+				pushValue(NewElement("", "", 0, []Element{}, []Attribute{})).
+				some()
+		case TOK_OPEN_CLOSING_ELEMENT_TAG: // </
+			return parserNext(parseClosingTagElement).
+				shift().
 				some()
 		case TOK_STRING:
 			return parserNext(parseElements).
 				shift().
-				pushValue(Element{
-					Tag:  QName{Local: "#text"},
-					Text: tok.Value,
-				}).
+				pushValue(NewTextElement(tok.Value)).
 				reduceElement().
 				some()
 		default:
-			return parserNoTransition()
+			return parserNoTransition("<?", "<!--", "<", "</", "string")
 		}
 	},
-	// parseCommentElement
+	//1: parseCommentElement
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
 		case TOK_STRING:
@@ -193,7 +202,7 @@ var parserStates = []parserState{
 			return parserNoTransition("string")
 		}
 	},
-	// parseCommentElement-01
+	//2: parseCommentElement-01
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
 		case TOK_CLOSE_COMMENT: // -->
@@ -205,7 +214,7 @@ var parserStates = []parserState{
 			return parserNoTransition()
 		}
 	},
-	// parseElement
+	//3: parseElement
 	// Parse <foo bar="acme">...</foo>, <foo/>
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
@@ -218,7 +227,7 @@ var parserStates = []parserState{
 			return parserNoTransition("identifier")
 		}
 	},
-	// parseElementOpeningTagName
+	//4: parseElementOpeningTagName
 	// <[prefix:local], or <[local]
 	// Check if a prefix exists
 	func(tok Token) option.Option[sParserTransition] {
@@ -231,10 +240,11 @@ var parserStates = []parserState{
 		default:
 			return parserNext(parseOpeningTagElement).
 				reduceQName(false).
+				reduceTag().
 				some() // do not perform shifting !
 		}
 	},
-	// parseElementOpeningTagName01
+	//5: parseElementOpeningTagName01
 	// Get the local name
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
@@ -249,7 +259,7 @@ var parserStates = []parserState{
 			return parserNoTransition("identifier")
 		}
 	},
-	// parseOpeningTagElement
+	//6: parseOpeningTagElement
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
 		case TOK_ID: // We have an attribute
@@ -272,7 +282,7 @@ var parserStates = []parserState{
 			return parserNoTransition("identifier", "/>", ">")
 		}
 	},
-	// parseElementAttribute
+	//7: parseElementAttribute
 	// attribute = prefix:local="value"
 	//			 | local="value"
 	func(tok Token) option.Option[sParserTransition] {
@@ -285,7 +295,7 @@ var parserStates = []parserState{
 			return parserNoTransition(":", "=")
 		}
 	},
-	// parseElementAttributeName01
+	//8: parseElementAttributeName01
 	// attribute = prefix:local="value"
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
@@ -295,7 +305,7 @@ var parserStates = []parserState{
 			return parserNoTransition("identifier")
 		}
 	},
-	// parseElementAttributeValue
+	//9: parseElementAttributeValue
 	// Parse the attribute value
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
@@ -309,19 +319,19 @@ var parserStates = []parserState{
 			return parserNoTransition("string")
 		}
 	},
-	// parseClosingTagElement
+	//10: parseClosingTagElement
 	// Parse </prefix:foo>
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
 		case TOK_ID:
-			return parserNext(parseClosingTagNameElement03).
+			return parserNext(parseClosingTagNameElement01).
 				shift().
 				some()
 		default:
 			return parserNoTransition("identifier")
 		}
 	},
-	// parseClosingTagNameElement-01
+	//11: parseClosingTagNameElement-01
 	// Check if prefix is set
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
@@ -331,12 +341,11 @@ var parserStates = []parserState{
 				some()
 		default:
 			return parserNext(parseClosingTagNameElement03).
-				shift().
 				some()
 
 		}
 	},
-	// parseClosingTagNameElement-02
+	//12: parseClosingTagNameElement-02
 	// Retrieve the local name
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
@@ -348,26 +357,34 @@ var parserStates = []parserState{
 			return parserNoTransition("identifier")
 		}
 	},
-	// parseClosingTagNameElement03
+	//13: parseClosingTagNameElement03
 	// Check for closing tag ">"
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
 		case TOK_CLOSE_ELEMENT_TAG:
-			return parserNext(parseElements).shift().reduceElement().some()
+			return parserNext(parseElements).
+				shift().
+				reduceElement().
+				some()
 		default:
 			return parserNoTransition(">")
 		}
 	},
-	// parseProcInstElement
+	//14: parseProcInstElement
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
 		case TOK_ID:
-			return parserNext(parseProcInstElement01).shift().some()
+			return parserNext(parseProcInstElement01).
+				pushValue(tok.Value).
+				reduceQName(false).
+				reduceTag().
+				shift().
+				some()
 		default:
 			return parserNoTransition("identifier")
 		}
 	},
-	// parseProcInstElement01
+	//15: parseProcInstElement01
 	// Parse attribute name
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
@@ -383,7 +400,7 @@ var parserStates = []parserState{
 			return parserNoTransition("identifier")
 		}
 	},
-	// parseProcInstElementAttribute
+	//16: parseProcInstElementAttribute
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
 		case TOK_EQUAL:
@@ -392,7 +409,7 @@ var parserStates = []parserState{
 			return parserNoTransition("=")
 		}
 	},
-	// parseProcInstElementAttribute01
+	//17: parseProcInstElementAttribute01
 	func(tok Token) option.Option[sParserTransition] {
 		switch tok.Type {
 		case TOK_STRING:
@@ -426,17 +443,33 @@ func (p *Parser) attachToParentOrDocument(element Element) result.Result[bool] {
 		e := p.stack.Pop().Expect()
 		switch el := e.(type) {
 		case Element:
+			p.trace(func() string {
+				return fmt.Sprintf("reducing element %s in %s", element, el)
+			})
 			el.AttachChild(element)
-			p.stack.Push(e)
+			p.stack.Push(el)
 		default:
-			p.stack.Push(e)
-			return result.Failed[bool](errors.New(fmt.Sprintf("Expecting an element, got %v", el)))
+			p.stack.Push(el)
+			return result.Failed[bool](errors.New(fmt.Sprintf("Expecting an element, got %v #%d", el, p.state)))
 		}
 	} else { // We set it as the root of the document
+		p.trace(func() string {
+			return fmt.Sprintf("reducing element %s in %s", element, p.document)
+		})
 		p.document.AttachChild(element)
 	}
 
 	return result.Success(true)
+}
+
+func (p *Parser) trace(f func() string) {
+	if p.debug {
+		p.logs = append(p.logs, f())
+	}
+}
+
+func (p *Parser) GetTrace() []string {
+	return p.logs
 }
 
 func (p *Parser) Parse() result.Result[Document] {
@@ -478,30 +511,66 @@ func (p *Parser) Parse() result.Result[Document] {
 			))
 		}
 
-		p.state = transition.next
+		p.trace(func() string {
+			return fmt.Sprintf("state #%d", p.state)
+		})
 
 		/// Process the operations
 		// Rewind
 		if transition.op&parserShift == 0 {
 			p.rewindToken(tok)
+			p.trace(func() string {
+				return fmt.Sprintf("rewinding")
+			})
+		} else {
+			p.trace(func() string {
+				return fmt.Sprintf("shifting")
+			})
 		}
 
 		// Push values, if any
 		for _, v := range transition.values {
 			p.stack.Push(v)
+			p.trace(func() string {
+				return fmt.Sprintf("pushing %s", v)
+			})
 		}
 
 		// Reduce to a QName
 		if transition.op&parserReduceQName > 0 {
 			local := p.stack.Pop().Expect().(string)
-			p.stack.Push(QName{Local: local})
+			qname := QName{Local: local}
+			p.stack.Push(qname)
+			p.trace(func() string {
+				return fmt.Sprintf("reducing QName %s", qname)
+			})
 		}
 
 		// Reduce to a QName, with a Prefix
 		if transition.op&parserReduceQNameWithPrefix > 0 {
 			local := p.stack.Pop().Expect().(string)
 			prefix := p.stack.Pop().Expect().(string)
-			p.stack.Push(QName{Local: local, Prefix: option.Some(prefix)})
+			qname := QName{Local: local, Prefix: option.Some(prefix)}
+			p.stack.Push(qname)
+			p.trace(func() string {
+				return fmt.Sprintf("reducing QName (with prefix) %s", qname)
+			})
+		}
+
+		if transition.op&parserReduceTagName > 0 {
+			qname := p.stack.Pop().Expect().(QName)
+			elOpt := p.stack.Pop()
+			if elOpt.IsNone() {
+				return result.Failed[Document](errors.New(
+					fmt.Sprintf("Missing element to perform attribute reduction #%d", p.state),
+				))
+			}
+			el := elOpt.Expect().(Element)
+			el.Tag = qname
+			p.stack.Push(el)
+			p.trace(func() string {
+				return fmt.Sprintf("reducing tag name %s in %s", qname, el)
+			})
 		}
 
 		// Reduce the attribute
@@ -515,11 +584,15 @@ func (p *Parser) Parse() result.Result[Document] {
 				))
 			}
 			el := elOpt.Expect().(Element)
-			el.AttachAttribute(Attribute{
+			attr := Attribute{
 				Name:  attrName,
 				Value: attrValue,
-			})
+			}
+			el.AttachAttribute(attr)
 			p.stack.Push(el)
+			p.trace(func() string {
+				return fmt.Sprintf("reducing attribute %s in %s", attr, el)
+			})
 		}
 
 		// Reduce to text
@@ -528,6 +601,9 @@ func (p *Parser) Parse() result.Result[Document] {
 			el := p.stack.Pop().Expect().(Element)
 			el.Text = text
 			p.stack.Push(el)
+			p.trace(func() string {
+				return fmt.Sprintf("reducing text %s in %s", text, el)
+			})
 		}
 
 		// Reduce the element
@@ -541,5 +617,8 @@ func (p *Parser) Parse() result.Result[Document] {
 				return result.Failed[Document](errors.New(fmt.Sprintf("Expecting an element, got %v", el)))
 			}
 		}
+
+		p.state = transition.next
+
 	}
 }

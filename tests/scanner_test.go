@@ -17,6 +17,29 @@ const XML = `
 </prefix:text>
 `
 
+var XML_DOC = goxml.NewDocument([]goxml.Element{
+	goxml.NewElement("xml", "", goxml.ProcInstFlag, []goxml.Element{},
+		[]goxml.Attribute{
+			goxml.NewAttribute("version", "1.0"),
+			goxml.NewAttribute("encoding", "UTF-8"),
+		},
+	),
+	goxml.NewElement("prefix:text", "", 0,
+		[]goxml.Element{
+			goxml.NewElement("para", "", 0,
+				[]goxml.Element{
+					goxml.NewTextElement("hello world"),
+					goxml.NewElement("foo", "", 0, []goxml.Element{
+						goxml.NewTextElement("else"),
+					}, []goxml.Attribute{}),
+				},
+				[]goxml.Attribute{},
+			),
+		},
+		[]goxml.Attribute{},
+	),
+})
+
 var XML_TOKENS = []goxml.Token{
 	{Type: goxml.TOK_OPEN_PROCINST, Value: "<?", Row: 0, Col: 0},
 	{Type: goxml.TOK_ID, Value: "xml", Row: 1, Col: 3},
