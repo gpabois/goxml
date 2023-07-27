@@ -230,7 +230,7 @@ var parserStates = []parserState{
 		isPrefixSep := tok.Type == TOK_PREFIX_SEP // shift, go to parseElementAttributeName01
 		isEqual := tok.Type == TOK_EQUAL          // shift, reduce qname (no prefix), go to parseElementAttributeValue
 
-		invalid := !isPrefixSep || !isEqual
+		invalid := !isPrefixSep && !isEqual
 
 		op := (1 << parserShift) | (boolToInt16(isEqual) << parserReduceQName)
 

@@ -235,8 +235,8 @@ var scannerStates = []scannerState{
 	},
 	// scanInTagIdentifier
 	func(ch rune) scannerTransition {
-		isIdentifierSymbol := unicode.IsLetter(ch) || unicode.IsDigit(ch) // Shift, go to scanInTagIdentifier
-		hasReachedEndOfIdentifier := !isIdentifierSymbol                  // Rewind, skip, reduce to TOK_ID, go to scanInTag
+		isIdentifierSymbol := unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '-' // Shift, go to scanInTagIdentifier
+		hasReachedEndOfIdentifier := !isIdentifierSymbol                               // Rewind, skip, reduce to TOK_ID, go to scanInTag
 
 		op := (boolToByte(isIdentifierSymbol) << scannerShift) +
 			(boolToByte(hasReachedEndOfIdentifier) << scannerReduce) +
