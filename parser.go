@@ -520,7 +520,7 @@ func (p *Parser) Parse() result.Result[Document] {
 			p.trace(func() string {
 				return fmt.Sprintf("pushing new element")
 			})
-			p.elStack.Push(Element{Attributes: make(map[string]Attribute), Children: []Element{}})
+			p.elStack.Push(Element{Children: []Element{}})
 		}
 
 		if pushTokenValue {

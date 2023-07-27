@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gpabois/gostd/iter"
 	"github.com/gpabois/gostd/option"
+	"golang.org/x/exp/slices"
 )
 
 type Document struct {
@@ -83,7 +85,6 @@ func parseQName(name any) QName {
 func NewElement(tag any, text string, flag byte, children []Element, attributes []Attribute) Element {
 	el := Element{}
 
-	el.Attributes = make(map[string]Attribute)
 	el.Children = make([]Element, 0)
 	el.Tag = parseQName(tag)
 	el.Text = text
@@ -115,11 +116,46 @@ func NewCommentElement(text string) Element {
 	return NewElement("", text, CommentElementFlag, []Element{}, []Attribute{})
 }
 
+type Attributes struct {
+	inner []Attribute
+}
+
+func (attrs *Attributes) Length() int {
+	return len(attrs.inner)
+}
+
+func (attrs *Attributes) Iter() iter.Iterator[Attribute] {
+	return iter.IterSlice(&attrs.inner)
+}
+
+func (attrs *Attributes) GetRef(name any) option.Option[*Attribute] {
+	qname := parseQName(name)
+	idx := slices.IndexFunc(attrs.inner, func(in Attribute) bool {
+		return in.Name == qname
+	})
+	if idx == -1 {
+		return option.None[*Attribute]()
+	}
+
+	return option.Some(&attrs.inner[idx])
+}
+
+func (attrs *Attributes) Set(attr Attribute) {
+	idx := slices.IndexFunc(attrs.inner, func(in Attribute) bool {
+		return in.Name == attr.Name
+	})
+	if idx == -1 {
+		attrs.inner = append(attrs.inner, attr)
+	} else {
+		attrs.inner[idx] = attr
+	}
+}
+
 type Element struct {
 	Tag        QName
 	Text       string
 	Children   []Element
-	Attributes map[string]Attribute
+	Attributes Attributes
 	Flag       byte
 }
 
@@ -128,7 +164,7 @@ func (el Element) String() string {
 }
 
 func (el *Element) AttachAttribute(attr Attribute) {
-	el.Attributes[attr.Name.String()] = attr
+	el.Attributes.Set(attr)
 }
 
 func (el *Element) AttachChild(child Element) {

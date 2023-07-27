@@ -3,6 +3,8 @@ package goxml
 import (
 	"io"
 	"strings"
+
+	"github.com/gpabois/gostd/iter"
 )
 
 type WriteArgs struct {
@@ -54,16 +56,17 @@ func writeChildren(w io.Writer, el *Element, args WriteArgs) {
 }
 
 func writeAttributes(w io.Writer, el *Element, args WriteArgs) {
-	if len(el.Attributes) > 0 {
+	if el.Attributes.Length() > 0 {
 		io.WriteString(w, " ")
 		n := 0
-		for _, a := range el.Attributes {
+
+		iter.ForEach(el.Attributes.Iter(), func(a Attribute) {
 			a.WriteTo(w, args)
 			if n < len(el.Children)-1 {
 				io.WriteString(w, " ")
 			}
 			n++
-		}
+		})
 	}
 }
 

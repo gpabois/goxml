@@ -9,6 +9,16 @@ const XML = `
 </prefix:text>
 `
 
+const EXPECTED_XML_STR = `<?xml version="1.0"encoding="UTF-8"?>
+<prefix:text attr:foo="bar">
+  <para>
+    hello world
+    <graph>
+      else
+    </graph>
+  </para>
+</prefix:text>`
+
 var XML_DOC = goxml.NewDocument([]goxml.Element{
 	goxml.NewElement("xml", "", goxml.ProcInstFlag, []goxml.Element{},
 		[]goxml.Attribute{
