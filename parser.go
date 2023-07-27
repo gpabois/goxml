@@ -22,6 +22,7 @@ type Parser struct {
 	scanner  iter.Iterator[result.Result[Token]]
 	document Document
 	stack    collection.Stack[any]
+	elStack  collection.Stack[Element]
 	tokStack collection.Stack[Token] // Used to rewind token
 	debug    bool
 	logs     []string
@@ -35,113 +36,38 @@ func NewParser(r io.Reader, args ParserArgs) Parser {
 	}
 }
 
-// Consume the token, if not set it will rewind the token for the next loop
-const parserShift = byte(1)
+const (
+	// Consume the token, if not set it will rewind the token for the next loop
+	parserShift = int16(iota)
+	parserPushTokenValue
+	parserPushElement
+	parserReduceFlag
+	parserReduceElement
+	parserReduceAttribute
+	parserReduceQName
+	parserReduceQNameWithPrefix
+	parserReduceTagName
+	parserReduceText
+)
 
-// [Child, Parent, ...] => Parent.AttachChild(Element)
-// OR [Child] => Document.AttachRoot(Child)
-const parserReduceElement = byte(1 << 1)
-
-// [Value, QName, Element] => Element.AttachAttribute(Attribute{QName, Value})
-const parserReduceAttribute = byte(1 << 2)
-
-// [Local] => QName{Prefix}
-const parserReduceQName = byte(1 << 3)
-
-// [Prefix, Local] => QName{Local, Prefix}
-const parserReduceQNameWithPrefix = byte(1 << 4)
-
-// Reduce [Element, QName] => Element.Tag = QName
-const parserReduceTagName = byte(1 << 5)
-
-// Reduce [Element, String] => Element.Text = string
-const parserReduceText = byte(1 << 6)
-
-// Define an invalid transition
-const parserInvalidTransition = byte(1 << 7)
-
-type sParserTransition struct {
-	op             byte
-	next           int8
-	values         []any
-	expectedTokens []string
+type parserTransition struct {
+	op      int16
+	next    int8
+	flag    byte
+	invalid bool
 }
 
-func parserNext(next int8) sParserTransition {
-	return sParserTransition{
-		next: next,
-	}
-}
-
-func (t sParserTransition) some() option.Option[sParserTransition] {
-	return option.Some(t)
-}
-
-func (t sParserTransition) shift() sParserTransition {
-	t.op = t.op | parserShift
-	return t
-}
-
-func (t sParserTransition) pushValue(value any) sParserTransition {
-	t.values = append(t.values, value)
-	return t
-}
-
-func (t sParserTransition) reduceText() sParserTransition {
-	t.op = t.op | parserReduceText
-	return t
-}
-
-func (t sParserTransition) reduceElement() sParserTransition {
-	t.op = t.op | parserReduceElement
-	return t
-}
-
-func (t sParserTransition) reduceAttribute() sParserTransition {
-	t.op = t.op | parserReduceAttribute
-	return t
-}
-
-func (t sParserTransition) reduceQName(withPrefix bool) sParserTransition {
-	if withPrefix {
-		t.op = t.op | parserReduceQNameWithPrefix
-	} else {
-		t.op = t.op | parserReduceQName
-	}
-	return t
-}
-
-func (t sParserTransition) reduceTag() sParserTransition {
-	t.op = t.op | parserReduceTagName
-	return t
-}
-
-// No transition match the criteria
-func parserNoTransition(expectedTokens ...string) option.Option[sParserTransition] {
-	return option.Some(sParserTransition{op: parserInvalidTransition, expectedTokens: expectedTokens})
-}
-
-type parserState = func(tok Token) option.Option[sParserTransition]
+type parserState = func(tok Token) parserTransition
 
 // Adresses to parser states
 const (
-	// Parse <foo/>, <foo></foo>, <!-- whatever -->, <?foo ... ?>
-	parseElements = iota
-	// Parse a Comment <!-- ... -->
-	// Retrieve the text
+	parseElements = int8(iota)
 	parseComment
-	// Parse the -->
-	// Reduce as a comment element
-	parseComment_02
-	// Parse an <foo attributes>elements</foo>
+	parseComment02
 	parseElement
-	// Parse prefix:local, or local
 	parseOpeningTagElementName
-	// Parse the local, with prefix
 	parseOpeningTagElementName01
-	// Parse attribute, >, or />
 	parseOpeningTagElement
-	// Parse prefix:local="value"
 	parseElementAttribute
 	parseElementAttributeName01
 	parseElementAttributeValue
@@ -155,271 +81,314 @@ const (
 	parseProcInstElementAttribute01
 )
 
+// Expected token types, per state
+var expectedTokens = [][]string{
+	{"<?", "<!--", "<", "</", "string"},
+	{"string"},
+	{"-->"},
+	{"identifier"},
+	{},
+	{"identifier"},
+	{"identifier", "/>", ">"},
+	{":", "="},
+	{"identifier"},
+	{"string"},
+	{"identifier"},
+	{},
+	{"identifier"},
+	{">"},
+	{"identifier"},
+	{"identifier", "?"},
+	{"="},
+	{"string"},
+}
+
 // All parser states
 var parserStates = []parserState{
-	//0: parseElements
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_OPEN_PROCINST: // <?
-			return parserNext(parseProcInstElement).
-				shift().
-				pushValue(NewElement("", "", ProcInstFlag, []Element{}, []Attribute{})).
-				some()
-		case TOK_OPEN_COMMENT: // <!--
-			return parserNext(parseComment).
-				shift().
-				pushValue(NewCommentElement("")).
-				some()
-		case TOK_OPEN_ELEMENT_TAG: // <
-			return parserNext(parseElement).
-				shift().
-				pushValue(NewElement("", "", 0, []Element{}, []Attribute{})).
-				some()
-		case TOK_OPEN_CLOSING_ELEMENT_TAG: // </
-			return parserNext(parseClosingTagElement).
-				shift().
-				some()
-		case TOK_STRING:
-			return parserNext(parseElements).
-				shift().
-				pushValue(NewTextElement(tok.Value)).
-				reduceElement().
-				some()
-		default:
-			return parserNoTransition("<?", "<!--", "<", "</", "string")
+	// parseElements
+	func(tok Token) parserTransition {
+		isOpenProcInst := tok.Type == TOK_OPEN_PROCINST              // Shift, push element, reduce flag, go to parseProcInstElement
+		isOpenComment := tok.Type == TOK_OPEN_COMMENT                // Shift, push element, reduce flag, go to parseComment
+		isOpenTag := tok.Type == TOK_OPEN_ELEMENT_TAG                // Shift, push element, go to parseElement
+		isOpenClosingTag := tok.Type == TOK_OPEN_CLOSING_ELEMENT_TAG // Shift, go to parseClosingTagElement
+		isText := tok.Type == TOK_STRING                             // Shift, push element, reduce flag, push token value, reduce text, reduce element go to parseElements
+
+		invalid := !isOpenProcInst && !isOpenComment && !isOpenTag && !isOpenClosingTag && !isText
+		// Encode operations
+		op := (1 << parserShift) |
+			(boolToInt16(isOpenProcInst || isOpenComment || isOpenTag || isText) << parserPushElement) |
+			(boolToInt16(isText) << parserPushTokenValue) |
+			(boolToInt16(isOpenProcInst || isOpenComment || isText) << parserReduceFlag) |
+			(boolToInt16(isText) << parserReduceText) |
+			(boolToInt16(isText) << parserReduceElement)
+
+		// Encode element tag
+		flag := (boolToByte(isOpenProcInst) * ProcInstFlag) +
+			(boolToByte(isOpenComment) * CommentElementFlag) +
+			(boolToByte(isText) * TextElementFlag)
+
+		// Next transition
+		next := boolToInt8(isOpenProcInst)*parseProcInstElement +
+			boolToInt8(isOpenComment)*parseComment +
+			boolToInt8(isOpenTag)*parseElement +
+			boolToInt8(isOpenClosingTag)*parseClosingTagElement +
+			boolToInt8(isText)*parseElements
+
+		return parserTransition{
+			op:      op,
+			flag:    flag,
+			next:    next,
+			invalid: invalid,
 		}
 	},
-	//1: parseCommentElement
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_STRING:
-			return parserNext(parseComment_02).
-				shift().
-				pushValue(tok.Value).
-				reduceText().
-				some()
-		default:
-			return parserNoTransition("string")
+	// parseComment
+	func(tok Token) parserTransition {
+		isString := tok.Type == TOK_STRING // Shift, push token value, reduce text, go to parseComment02
+		invalid := !isString
+
+		return parserTransition{
+			op:      (1 << parserShift) | (1 << parserPushTokenValue) | (1 << parserReduceText),
+			next:    parseComment02,
+			invalid: invalid,
 		}
 	},
-	//2: parseCommentElement-01
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_CLOSE_COMMENT: // -->
-			return parserNext(0).
-				shift().
-				reduceElement().
-				some()
-		default:
-			return parserNoTransition()
+	// parseComment02
+	func(tok Token) parserTransition {
+		isClosingComment := tok.Type == TOK_CLOSE_COMMENT // Shift, reduce element, go to parseElements
+		invalid := !isClosingComment
+
+		return parserTransition{
+			op:      (1 << parserShift) | (1 << parserReduceElement),
+			next:    parseElements,
+			invalid: invalid,
 		}
 	},
-	//3: parseElement
-	// Parse <foo bar="acme">...</foo>, <foo/>
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_ID:
-			return parserNext(parseOpeningTagElementName).
-				shift().
-				pushValue(tok.Value).
-				some()
-		default:
-			return parserNoTransition("identifier")
+	// parseElement
+	func(tok Token) parserTransition {
+		isIdentifier := tok.Type == TOK_ID // Shift, push token value go to parseOpeningTagElementName
+		invalid := !isIdentifier
+
+		return parserTransition{
+			op:      (1 << parserShift) | (1 << parserPushTokenValue),
+			next:    parseOpeningTagElementName,
+			invalid: invalid,
 		}
 	},
-	//4: parseElementOpeningTagName
-	// <[prefix:local], or <[local]
-	// Check if a prefix exists
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		// We have a prefix separator
-		case TOK_PREFIX_SEP:
-			return parserNext(parseOpeningTagElementName01).
-				shift().
-				some()
-		default:
-			return parserNext(parseOpeningTagElement).
-				reduceQName(false).
-				reduceTag().
-				some() // do not perform shifting !
+	// parseElementOpeningTagName
+	func(tok Token) parserTransition {
+		isPrefixSep := tok.Type == TOK_PREFIX_SEP // shift, go to parseOpeningTagElementName01
+		isEndOfTagName := !isPrefixSep            // rewind, reduce QName, reduce tag name, go to parseOpeningTagElement
+
+		// Encode operations
+		op := (boolToInt16(isPrefixSep) << parserShift) |
+			(boolToInt16(isEndOfTagName) << parserReduceQName) |
+			(boolToInt16(isEndOfTagName) << parserReduceTagName)
+
+		// Set next transition
+		next := boolToInt8(isPrefixSep)*parseOpeningTagElementName01 +
+			boolToInt8(isEndOfTagName)*parseOpeningTagElement
+
+		return parserTransition{
+			op:   op,
+			next: next,
 		}
 	},
-	//5: parseElementOpeningTagName01
-	// Get the local name
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_ID:
-			return parserNext(parseOpeningTagElement).
-				shift().
-				pushValue(tok.Value).
-				reduceQName(true).
-				reduceTag().
-				some()
-		default:
-			return parserNoTransition("identifier")
+	// parseElementOpeningTagName01
+	func(tok Token) parserTransition {
+		isIdentifier := tok.Type == TOK_ID // shift, push token value, reduce qname with prefix, reduce tag, go to parseOpeningTagElement
+		invalid := !isIdentifier
+
+		return parserTransition{
+			op:      (1 << parserShift) | (1 << parserPushTokenValue) | (1 << parserReduceQNameWithPrefix) | (1 << parserReduceTagName),
+			next:    parseOpeningTagElement,
+			invalid: invalid,
 		}
 	},
-	//6: parseOpeningTagElement
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_ID: // We have an attribute
-			return parserNext(parseElementAttribute).
-				shift().
-				pushValue(tok.Value).
-				some()
-		// Reduce the element
-		case TOK_CLOSE_SINGLE_ELEMENT_TAG:
-			return parserNext(0).
-				shift().
-				reduceElement().
-				some()
-		// Inner-element
-		case TOK_CLOSE_ELEMENT_TAG:
-			return parserNext(parseElements).
-				shift().
-				some()
-		default:
-			return parserNoTransition("identifier", "/>", ">")
+	// parseOpeningTagElement
+	func(tok Token) parserTransition {
+		isIdentifier := tok.Type == TOK_ID                                  // Shift, push token value, go to parseElementAttribute
+		isCloseSingleElementTag := tok.Type == TOK_CLOSE_SINGLE_ELEMENT_TAG // Shift, reduce element go to parseElements
+		isCloseElementTag := tok.Type == TOK_CLOSE_ELEMENT_TAG              // Shift, go to parseElements
+
+		invalid := !isIdentifier && !isCloseSingleElementTag && !isCloseElementTag
+
+		op := (1 << parserShift) |
+			(boolToInt16(isIdentifier) << parserPushTokenValue) |
+			(boolToInt16(isCloseSingleElementTag) << parserReduceElement)
+
+		next := boolToInt8(isIdentifier)*parseElementAttribute +
+			boolToInt8(isCloseSingleElementTag || isCloseElementTag)*parseElements
+
+		return parserTransition{
+			op:      op,
+			next:    next,
+			invalid: invalid,
 		}
 	},
-	//7: parseElementAttribute
-	// attribute = prefix:local="value"
-	//			 | local="value"
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_PREFIX_SEP:
-			return parserNext(parseElementAttributeName01).shift().some()
-		case TOK_EQUAL:
-			return parserNext(9).shift().reduceQName(false).some()
-		default:
-			return parserNoTransition(":", "=")
+	// parseElementAttribute
+	func(tok Token) parserTransition {
+		isPrefixSep := tok.Type == TOK_PREFIX_SEP // shift, go to parseElementAttributeName01
+		isEqual := tok.Type == TOK_EQUAL          // shift, reduce qname (no prefix), go to parseElementAttributeValue
+
+		invalid := !isPrefixSep || !isEqual
+
+		op := (1 << parserShift) | (boolToInt16(isEqual) << parserReduceQName)
+
+		next := boolToInt8(isPrefixSep)*parseElementAttributeName01 + boolToInt8(isEqual)*parseElementAttributeValue
+
+		return parserTransition{
+			op:      op,
+			next:    next,
+			invalid: invalid,
 		}
 	},
-	//8: parseElementAttributeName01
-	// attribute = prefix:local="value"
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_ID:
-			return parserNext(7).shift().pushValue(tok.Value).reduceQName(true).some()
-		default:
-			return parserNoTransition("identifier")
+	// parseElementAttributeName01
+	// prefixed attribute name
+	func(tok Token) parserTransition {
+		isIdentifier := tok.Type == TOK_ID // shift, push token value, reduce QName, go to parseElementAttribute
+
+		invalid := !isIdentifier
+		op := (1 << parserShift) | (1 << parserPushTokenValue) | (1 << parserReduceQNameWithPrefix)
+		next := parseElementAttribute
+
+		return parserTransition{
+			op:      int16(op),
+			next:    int8(next),
+			invalid: invalid,
 		}
 	},
-	//9: parseElementAttributeValue
-	// Parse the attribute value
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_STRING:
-			return parserNext(6).
-				shift().
-				pushValue(tok.Value).
-				reduceAttribute().
-				some()
-		default:
-			return parserNoTransition("string")
+	// parseElementAttributeValue
+	func(tok Token) parserTransition {
+		isString := tok.Type == TOK_STRING // shift, push token value, reduce attribute, go to parseOpeningTagElement
+
+		invalid := !isString
+		op := (1 << parserShift) | (1 << parserPushTokenValue) | (1 << parserReduceAttribute)
+		next := parseOpeningTagElement
+
+		return parserTransition{
+			op:      int16(op),
+			next:    int8(next),
+			invalid: invalid,
 		}
 	},
-	//10: parseClosingTagElement
+	// parseClosingTagElement
 	// Parse </prefix:foo>
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_ID:
-			return parserNext(parseClosingTagNameElement01).
-				shift().
-				some()
-		default:
-			return parserNoTransition("identifier")
+	func(tok Token) parserTransition {
+		isIdentifier := tok.Type == TOK_ID // shift, go to parseClosingTagNameElement01
+		invalid := !isIdentifier
+
+		op := (1 << parserShift)
+		next := parseClosingTagNameElement01
+
+		return parserTransition{
+			op:      int16(op),
+			next:    int8(next),
+			invalid: invalid,
 		}
 	},
 	//11: parseClosingTagNameElement-01
 	// Check if prefix is set
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_PREFIX_SEP:
-			return parserNext(parseClosingTagNameElement02).
-				shift().
-				some()
-		default:
-			return parserNext(parseClosingTagNameElement03).
-				some()
+	func(tok Token) parserTransition {
+		isTokenPrefixSep := tok.Type == TOK_PREFIX_SEP // shift, go to parseClosingTagNameElement02
+		isEndOfTagName := !isTokenPrefixSep            // rewind, go to parseClosingTagNameElement03
 
+		op := (boolToInt16(isTokenPrefixSep) << parserShift)
+		next := boolToInt8(isTokenPrefixSep)*parseClosingTagNameElement02 + boolToInt8(isEndOfTagName)*parseClosingTagNameElement03
+
+		return parserTransition{
+			op:   op,
+			next: next,
 		}
 	},
 	//12: parseClosingTagNameElement-02
 	// Retrieve the local name
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_ID:
-			return parserNext(parseClosingTagNameElement03).
-				shift().
-				some()
-		default:
-			return parserNoTransition("identifier")
+	func(tok Token) parserTransition {
+		isIdentifier := tok.Type == TOK_ID // shift, go to parseClosingTagNameElement03
+		invalid := !isIdentifier
+
+		op := (1 << parserShift)
+		next := parseClosingTagNameElement03
+
+		return parserTransition{
+			op:      int16(op),
+			next:    int8(next),
+			invalid: invalid,
 		}
 	},
 	//13: parseClosingTagNameElement03
 	// Check for closing tag ">"
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_CLOSE_ELEMENT_TAG:
-			return parserNext(parseElements).
-				shift().
-				reduceElement().
-				some()
-		default:
-			return parserNoTransition(">")
+	func(tok Token) parserTransition {
+		isCloseElementTag := tok.Type == TOK_CLOSE_ELEMENT_TAG // shift, reduce element, go to parseElements
+		invalid := !isCloseElementTag
+
+		op := (1 << parserShift) | (1 << parserReduceElement)
+		next := parseElements
+
+		return parserTransition{
+			op:      int16(op),
+			next:    next,
+			invalid: invalid,
 		}
 	},
 	//14: parseProcInstElement
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_ID:
-			return parserNext(parseProcInstElement01).
-				pushValue(tok.Value).
-				reduceQName(false).
-				reduceTag().
-				shift().
-				some()
-		default:
-			return parserNoTransition("identifier")
+	func(tok Token) parserTransition {
+		isIdentifier := tok.Type == TOK_ID // shift, push token value, reduce qname, reduce tag name, go to parseProcInstElement01
+		invalid := !isIdentifier
+
+		op := (1 << parserShift) | (1 << parserPushTokenValue) | (1 << parserReduceQName) | (1 << parserReduceTagName)
+		next := parseProcInstElement01
+
+		return parserTransition{
+			op:      int16(op),
+			next:    next,
+			invalid: invalid,
 		}
 	},
 	//15: parseProcInstElement01
-	// Parse attribute name
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_ID:
-			return parserNext(parseProcInstElementAttribute).
-				shift().
-				pushValue(tok.Value).
-				reduceQName(false).
-				some()
-		case TOK_CLOSE_PROCINST:
-			return parserNext(parseElements).shift().reduceElement().some()
-		default:
-			return parserNoTransition("identifier")
+	func(tok Token) parserTransition {
+		isIdentifier := tok.Type == TOK_ID                // shift, push token value, reduce QName, go to parseProcInstElementAttribute
+		isCloseProcInst := tok.Type == TOK_CLOSE_PROCINST // shift, reduce element, go to parseElements
+
+		invalid := !isIdentifier && !isCloseProcInst
+
+		op := (1 << parserShift) |
+			(boolToInt16(isIdentifier) << parserPushTokenValue) | (boolToInt16(isIdentifier) << parserReduceQName) |
+			(boolToInt16(isCloseProcInst) << parserReduceElement)
+
+		next := (boolToInt8(isIdentifier) * parseProcInstElementAttribute) + (boolToInt8(isCloseProcInst) * parseElements)
+
+		return parserTransition{
+			op:      op,
+			next:    next,
+			invalid: invalid,
 		}
 	},
 	//16: parseProcInstElementAttribute
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_EQUAL:
-			return parserNext(parseProcInstElementAttribute01).shift().some()
-		default:
-			return parserNoTransition("=")
+	func(tok Token) parserTransition {
+		isEqual := tok.Type == TOK_EQUAL // shift, go to parseProcInstElementAttribute01
+
+		invalid := !isEqual
+		op := (1 << parserShift)
+		next := parseProcInstElementAttribute01
+
+		return parserTransition{
+			op:      int16(op),
+			next:    next,
+			invalid: invalid,
 		}
 	},
 	//17: parseProcInstElementAttribute01
-	func(tok Token) option.Option[sParserTransition] {
-		switch tok.Type {
-		case TOK_STRING:
-			return parserNext(parseProcInstElement01).
-				shift().
-				pushValue(tok.Value).
-				reduceAttribute().
-				some()
-		default:
-			return parserNoTransition("string")
+	func(tok Token) parserTransition {
+		isString := tok.Type == TOK_STRING // shift, push token value, reduce attribute, go to parseProcInstElement01
+
+		invalid := !isString
+		op := (1 << parserShift) | (1 << parserPushTokenValue) | (1 << parserReduceAttribute)
+		next := parseProcInstElement01
+
+		return parserTransition{
+			op:      int16(op),
+			next:    next,
+			invalid: invalid,
 		}
 	},
 }
@@ -439,19 +408,12 @@ func (p *Parser) nextToken() option.Option[result.Result[Token]] {
 
 func (p *Parser) attachToParentOrDocument(element Element) result.Result[bool] {
 	// We have a parent element
-	if p.stack.Last().IsSome() {
-		e := p.stack.Pop().Expect()
-		switch el := e.(type) {
-		case Element:
-			p.trace(func() string {
-				return fmt.Sprintf("reducing element %s in %s", element, el)
-			})
-			el.AttachChild(element)
-			p.stack.Push(el)
-		default:
-			p.stack.Push(el)
-			return result.Failed[bool](errors.New(fmt.Sprintf("Expecting an element, got %v #%d", el, p.state)))
-		}
+	if p.elStack.Last().IsSome() {
+		parent := p.elStack.Last().Expect()
+		p.trace(func() string {
+			return fmt.Sprintf("reducing element %s in %s", element, parent)
+		})
+		parent.AttachChild(element)
 	} else { // We set it as the root of the document
 		p.trace(func() string {
 			return fmt.Sprintf("reducing element %s in %s", element, p.document)
@@ -492,32 +454,40 @@ func (p *Parser) Parse() result.Result[Document] {
 			return result.Success(p.document)
 		}
 
-		transitionOpt := parserStates[p.state](tok)
-		if transitionOpt.IsNone() {
-			return result.Failed[Document](errors.New("Invalid token"))
-		}
+		transition := parserStates[p.state](tok)
 
-		transition := transitionOpt.Expect()
-		if transition.op&parserInvalidTransition > 0 {
+		if transition.invalid {
 			return result.Failed[Document](errors.New(
 				fmt.Sprintf(
 					"Invalid token %s at (row: %d, col: %d), expecting: %s #%d",
 					tok.TypeName(),
 					tok.Row,
 					tok.Col,
-					strings.Join(transition.expectedTokens, ", "),
+					strings.Join(expectedTokens[p.state], ", "),
 					p.state,
 				),
 			))
 		}
 
 		p.trace(func() string {
-			return fmt.Sprintf("state #%d", p.state)
+			return fmt.Sprintf("state #%d, token: %s", p.state, tok)
 		})
 
-		/// Process the operations
+		// Decode operations
+		shift := ((transition.op >> parserShift) & 1) == 1
+		pushTokenValue := ((transition.op >> parserPushTokenValue) & 1) == 1
+		pushElement := ((transition.op >> parserPushElement) & 1) == 1
+		reduceFlag := ((transition.op >> parserReduceFlag) & 1) == 1
+		reduceQName := ((transition.op >> parserReduceQName) & 1) == 1
+		reduceQNameWithPrefix := ((transition.op >> parserReduceQNameWithPrefix) & 1) == 1
+		reduceTagName := ((transition.op >> parserReduceTagName) & 1) == 1
+		reduceAttribute := ((transition.op >> parserReduceAttribute) & 1) == 1
+		reduceText := ((transition.op >> parserReduceText) & 1) == 1
+		reduceElement := ((transition.op >> parserReduceElement) & 1) == 1
+
+		/// Execute the operations
 		// Rewind
-		if transition.op&parserShift == 0 {
+		if !shift {
 			p.rewindToken(tok)
 			p.trace(func() string {
 				return fmt.Sprintf("rewinding")
@@ -528,16 +498,42 @@ func (p *Parser) Parse() result.Result[Document] {
 			})
 		}
 
-		// Push values, if any
-		for _, v := range transition.values {
-			p.stack.Push(v)
+		// Push commands
+		if pushElement {
 			p.trace(func() string {
-				return fmt.Sprintf("pushing %s", v)
+				return fmt.Sprintf("pushing new element")
+			})
+			p.elStack.Push(Element{Attributes: make(map[string]Attribute), Children: []Element{}})
+		}
+
+		if pushTokenValue {
+			p.trace(func() string {
+				return fmt.Sprintf("pushing token value \"%s\"", tok.Value)
+			})
+			p.stack.Push(tok.Value)
+		}
+
+		// Reduce flag
+		if reduceFlag {
+			element := p.elStack.Last().Expect()
+			element.Flag = element.Flag | transition.flag
+			p.trace(func() string {
+				return fmt.Sprintf("reducing flag %d in %s", transition.flag, element)
+			})
+		}
+
+		// Reduce to text
+		if reduceText {
+			element := p.elStack.Last().Expect()
+			text := p.stack.Pop().Expect().(string)
+			element.Text = text
+			p.trace(func() string {
+				return fmt.Sprintf("reducing text %s in %s", text, element)
 			})
 		}
 
 		// Reduce to a QName
-		if transition.op&parserReduceQName > 0 {
+		if reduceQName {
 			local := p.stack.Pop().Expect().(string)
 			qname := QName{Local: local}
 			p.stack.Push(qname)
@@ -547,7 +543,7 @@ func (p *Parser) Parse() result.Result[Document] {
 		}
 
 		// Reduce to a QName, with a Prefix
-		if transition.op&parserReduceQNameWithPrefix > 0 {
+		if reduceQNameWithPrefix {
 			local := p.stack.Pop().Expect().(string)
 			prefix := p.stack.Pop().Expect().(string)
 			qname := QName{Local: local, Prefix: option.Some(prefix)}
@@ -557,68 +553,41 @@ func (p *Parser) Parse() result.Result[Document] {
 			})
 		}
 
-		if transition.op&parserReduceTagName > 0 {
+		if reduceTagName {
+			element := p.elStack.Last().Expect()
 			qname := p.stack.Pop().Expect().(QName)
-			elOpt := p.stack.Pop()
-			if elOpt.IsNone() {
-				return result.Failed[Document](errors.New(
-					fmt.Sprintf("Missing element to perform attribute reduction #%d", p.state),
-				))
-			}
-			el := elOpt.Expect().(Element)
-			el.Tag = qname
-			p.stack.Push(el)
+			element.Tag = qname
 			p.trace(func() string {
-				return fmt.Sprintf("reducing tag name %s in %s", qname, el)
+				return fmt.Sprintf("reducing tag name %s in %s", qname, element)
 			})
 		}
 
 		// Reduce the attribute
-		if transition.op&parserReduceAttribute > 0 {
+		if reduceAttribute {
+			element := p.elStack.Last().Expect()
 			attrValue := p.stack.Pop().Expect().(string)
 			attrName := p.stack.Pop().Expect().(QName)
-			elOpt := p.stack.Pop()
-			if elOpt.IsNone() {
-				return result.Failed[Document](errors.New(
-					fmt.Sprintf("Missing element to perform attribute reduction #%d", p.state),
-				))
-			}
-			el := elOpt.Expect().(Element)
 			attr := Attribute{
 				Name:  attrName,
 				Value: attrValue,
 			}
-			el.AttachAttribute(attr)
-			p.stack.Push(el)
+			element.AttachAttribute(attr)
 			p.trace(func() string {
-				return fmt.Sprintf("reducing attribute %s in %s", attr, el)
-			})
-		}
-
-		// Reduce to text
-		if transition.op&parserReduceText > 0 {
-			text := p.stack.Pop().Expect().(string)
-			el := p.stack.Pop().Expect().(Element)
-			el.Text = text
-			p.stack.Push(el)
-			p.trace(func() string {
-				return fmt.Sprintf("reducing text %s in %s", text, el)
+				return fmt.Sprintf("reducing attribute %s in %s", attr, element)
 			})
 		}
 
 		// Reduce the element
-		if transition.op&parserReduceElement > 0 {
-			switch el := p.stack.Pop().Expect().(type) {
-			case Element:
-				if res := p.attachToParentOrDocument(el); res.HasFailed() {
-					return result.Failed[Document](res.UnwrapError())
-				}
-			default:
-				return result.Failed[Document](errors.New(fmt.Sprintf("Expecting an element, got %v", el)))
-			}
+		if reduceElement {
+			el := p.elStack.Pop().Expect()
+			p.attachToParentOrDocument(el)
 		}
 
 		p.state = transition.next
+
+		p.trace(func() string {
+			return fmt.Sprintf("go to #%d", transition.next)
+		})
 
 	}
 }

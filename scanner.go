@@ -12,270 +12,317 @@ import (
 )
 
 const (
-	TOK_EOF = iota
-	TOK_INVALID
-	TOK_ID
-	TOK_STRING
-	TOK_PREFIX_SEP               // :
-	TOK_EQUAL                    // =
-	TOK_OPEN_ELEMENT_TAG         // <
-	TOK_CLOSE_SINGLE_ELEMENT_TAG // />
-	TOK_OPEN_CLOSING_ELEMENT_TAG // </
-	TOK_CLOSE_ELEMENT_TAG        // >
-	TOK_OPEN_COMMENT             // <!--
-	TOK_CLOSE_COMMENT            // -->
-	TOK_OPEN_PROCINST            // <?
-	TOK_CLOSE_PROCINST           // ?>
-)
-
-type Token struct {
-	Type  int8
-	Value string
-	Row   int
-	Col   int
-}
-
-func (tok Token) TypeName() string {
-	switch tok.Type {
-	case TOK_EOF:
-		return "[EOF]"
-	case TOK_INVALID:
-		return "[INVALID]"
-	case TOK_ID:
-		return "identifier"
-	case TOK_STRING:
-		return "string"
-	case TOK_PREFIX_SEP:
-		return ":"
-	case TOK_EQUAL:
-		return "="
-	case TOK_OPEN_ELEMENT_TAG:
-		return "<"
-	case TOK_OPEN_CLOSING_ELEMENT_TAG:
-		return "</"
-	case TOK_CLOSE_SINGLE_ELEMENT_TAG:
-		return "/>"
-	case TOK_CLOSE_ELEMENT_TAG:
-		return ">"
-	case TOK_OPEN_COMMENT:
-		return "<!--"
-	case TOK_CLOSE_COMMENT:
-		return "-->"
-	case TOK_OPEN_PROCINST:
-		return "<?"
-	case TOK_CLOSE_PROCINST:
-		return "?>"
-	default:
-		return "[UNKNOWN]"
-	}
-}
-
-const (
-	scannerShiftOp  = byte(0b1)   // Shift the stream
-	scannerReduceOp = byte(0b10)  // Reduce to a token
-	scannerSkipOp   = byte(0b100) // Does not add the char to the aggregator
+	scannerShift  = 0 // 0b1
+	scannerReduce = 1 // 0b10
+	scannerSkip   = 2 // 0b100
 )
 
 type scannerTransition struct {
 	op      byte
 	tokType int8
 	next    int8
+	invalid bool
 }
 
-func scannerShift(next int8) option.Option[scannerTransition] {
-	return option.Some(scannerTransition{
-		op:   scannerShiftOp,
-		next: next,
-	})
-}
+type scannerState = func(ch rune) scannerTransition
 
-func scannerSkip(next int8) option.Option[scannerTransition] {
-	return option.Some(scannerTransition{
-		op:   scannerSkipOp | scannerShiftOp,
-		next: next,
-	})
-}
+const (
+	scanRoot = iota
+	scanTagOpening
+	scanCommentTag
+	scanCommentTag01
+	scanCommentText
+	scanClosingCommentTag
+	scanClosingCommentTag01
+	scanClosingCommentTag02
+	scanInTag
+	scanInTagIdentifier
+	scanStringWithDoubleQuote
+	scanStringWithSingleQuote
+	scanStringEscapeWithDoubleQuote
+	scanStringEscapeWithSingleQuote
+	scanText
+	scanClosingProcInst
+)
 
-func scannerReduce(tokType, next int8, shift bool, skip bool) option.Option[scannerTransition] {
-	flag := scannerReduceOp
-	if shift {
-		flag = flag | scannerShiftOp
-	}
-	if skip {
-		flag = flag | scannerSkipOp
-	}
-
-	return option.Some(scannerTransition{
-		op:      flag,
-		next:    next,
-		tokType: tokType,
-	})
-}
-
-func scannerNoTransition() option.Option[scannerTransition] {
-	return option.None[scannerTransition]()
-}
-
-type scannerState = func(ch rune) option.Option[scannerTransition]
-
+// Contains all possible states of the scanner
 var scannerStates = []scannerState{
-	// 0: Root
-	func(ch rune) option.Option[scannerTransition] {
-		switch ch {
-		case '<': // Opening element
-			return scannerShift(1)
-		case ' ', '\n', '\t': // Whitespace
-			return scannerSkip(0)
-		case 0: // EOF
-			return scannerReduce(TOK_EOF, 0, false, false)
-		default: // Text
-			return scannerShift(14)
-		}
-	},
-	// 1: Opening-Root
-	func(ch rune) option.Option[scannerTransition] {
-		switch ch {
-		case '?':
-			return scannerReduce(TOK_OPEN_PROCINST, 8, true, false)
-		case '!':
-			return scannerShift(2)
-		case '/':
-			return scannerReduce(TOK_OPEN_CLOSING_ELEMENT_TAG, 8, true, false)
-		default:
-			return scannerReduce(TOK_OPEN_ELEMENT_TAG, 8, false, true)
-		}
-	},
-	// 2: Opening-Comment-0
-	func(ch rune) option.Option[scannerTransition] {
-		switch ch {
-		case '-':
-			return scannerShift(3)
-		default:
-			return scannerNoTransition()
-		}
-	},
-	// 3: Opening-Comment-Final
-	func(ch rune) option.Option[scannerTransition] {
-		switch ch {
-		case '-':
-			return scannerReduce(TOK_OPEN_COMMENT, 4, true, false)
-		default:
-			return scannerNoTransition()
-		}
-	},
-	// 4: Comment text
-	func(ch rune) option.Option[scannerTransition] {
-		switch ch {
-		case '-':
-			return scannerReduce(TOK_STRING, 5, true, false)
-		default:
-			return scannerNoTransition()
-		}
-	},
-	// 5: Closing-Comment-0
-	func(ch rune) option.Option[scannerTransition] {
-		switch ch {
-		case '-':
-			return scannerShift(6)
-		default:
-			return scannerNoTransition()
-		}
-	},
-	// 6: Closing-Comment-1
-	func(ch rune) option.Option[scannerTransition] {
-		switch ch {
-		case '-':
-			return scannerShift(7)
-		default:
-			return scannerNoTransition()
-		}
-	},
-	// 7: Closing-Comment-Final
-	func(ch rune) option.Option[scannerTransition] {
-		switch ch {
-		case '>':
-			return scannerReduce(TOK_CLOSE_COMMENT, 0, true, false)
-		default:
-			return scannerNoTransition()
-		}
-	},
-	// 8: In-Tag-Root
-	func(ch rune) option.Option[scannerTransition] {
-		if unicode.IsLetter(ch) {
-			return scannerShift(9)
-		}
-		switch ch {
-		case ' ', '\t', '\n':
-			return scannerSkip(8)
-		case '?':
-			return scannerShift(15)
-		case '>':
-			return scannerReduce(TOK_CLOSE_ELEMENT_TAG, 0, true, false)
-		case '=': // Attribute definition
-			return scannerReduce(TOK_EQUAL, 8, true, false)
-		case ':': // Prefix separator
-			return scannerReduce(TOK_PREFIX_SEP, 8, true, false)
-		case '"': // String with " delimiter
-			return scannerSkip(10)
-		case '\'': // String with ' delimiter
-			return scannerSkip(11)
-		}
+	// scanRoot
+	func(ch rune) scannerTransition {
+		// Boolean statements
+		isOpeningTag := ch == '<'                             // Shift, skip, go to scanTagOpening
+		isWhiteSpace := ch == ' ' || ch == '\n' || ch == '\t' // Shift, skip, go to scanRoot
+		isEOF := ch == 0                                      // Shift, reduce to TOK_EOF, go to scanRoot
+		isText := !isOpeningTag && !isWhiteSpace && !isEOF    // Rewind, go to scanText
 
-		return scannerNoTransition()
-	},
-	// 9: Identifier
-	func(ch rune) option.Option[scannerTransition] {
-		if unicode.IsLetter(ch) || unicode.IsDigit(ch) {
-			return scannerShift(9)
-		}
-		return scannerReduce(TOK_ID, 8, false, true)
-	},
-	// 10: String, with " delimiter
-	func(ch rune) option.Option[scannerTransition] {
-		switch ch {
-		case '"': // End of the string
-			return scannerReduce(TOK_STRING, 8, true, true)
-		case '\\':
-			return scannerSkip(12)
-		default:
-			return scannerShift(10)
+		// Operations to execute
+		op := (boolToByte(isOpeningTag || isWhiteSpace) << scannerShift) | // Shift
+			(boolToByte(isWhiteSpace || isText) << scannerSkip) | // Skip
+			(boolToByte(isEOF) << scannerReduce) // Reduce to token
+
+		// Next transition
+		next := boolToInt8(isOpeningTag)*scanTagOpening +
+			boolToInt8(isWhiteSpace || isEOF)*scanRoot +
+			boolToInt8(isText)*scanText
+
+		tokType := int8(TOK_EOF)
+
+		return scannerTransition{
+			op:      op,
+			tokType: tokType,
+			next:    next,
 		}
 	},
-	// 11: String, with ' delimiter
-	func(ch rune) option.Option[scannerTransition] {
-		switch ch {
-		case '\'': // End of the string
-			return scannerReduce(TOK_STRING, 8, true, true)
-		case '\\':
-			return scannerSkip(13)
-		default:
-			return scannerShift(11)
+	// scanTagOpening
+	func(ch rune) scannerTransition {
+		isProcInstTagOpening := ch == '?'                                                      // Shift, reduce to TOK_OPEN_PROCINST, go to scanInTag
+		isCommentTagOpening := ch == '!'                                                       // Shift, go to scanCommentTag
+		isOpenClosingElementTag := ch == '/'                                                   // Shift, reduce to TOK_OPEN_CLOSING_ELEMENT_TAG, go to scanInTag
+		isOpenTag := !isProcInstTagOpening && !isCommentTagOpening && !isOpenClosingElementTag // Rewind, skip, reduceo to  TOK_OPEN_ELEMENT_TAG, go to scanInTag
+
+		op := (boolToByte(isProcInstTagOpening || isCommentTagOpening || isOpenClosingElementTag) << scannerShift) +
+			(boolToByte(isProcInstTagOpening || isOpenClosingElementTag || isOpenTag) << scannerReduce) +
+			(boolToByte(isOpenTag) << scannerSkip)
+
+		next := boolToInt8(isProcInstTagOpening || isOpenClosingElementTag || isOpenTag)*scanInTag +
+			boolToInt8(isCommentTagOpening)*scanCommentTag
+
+		tokType := boolToInt8(isProcInstTagOpening)*TOK_OPEN_PROCINST +
+			boolToInt8(isOpenClosingElementTag)*TOK_OPEN_CLOSING_ELEMENT_TAG +
+			boolToInt8(isOpenTag)*TOK_OPEN_ELEMENT_TAG
+
+		return scannerTransition{
+			op:      op,
+			next:    next,
+			tokType: tokType,
 		}
 	},
-	// 12: Escape string with " del
-	func(ch rune) option.Option[scannerTransition] {
-		return scannerShift(10)
-	},
-	// 13: Escape string with ' del
-	func(ch rune) option.Option[scannerTransition] {
-		return scannerShift(11)
-	},
-	// 14: Text
-	func(ch rune) option.Option[scannerTransition] {
-		switch ch {
-		case '<':
-			return scannerReduce(TOK_STRING, 0, false, true)
-		default:
-			return scannerShift(14)
+	// scanCommentTag
+	func(ch rune) scannerTransition {
+		isDash := ch == '-' // Shift, reduce to TOK_OPEN_COMMENT, go to scanCommentTag01
+		isInvalid := !isDash
+
+		bIsDash := boolToByte(isDash)
+
+		op := (bIsDash << scannerShift) | (bIsDash << scannerReduce)
+		tokType := TOK_OPEN_COMMENT
+		invalid := isInvalid
+		next := scanClosingCommentTag01
+
+		return scannerTransition{
+			op:      op,
+			next:    int8(next),
+			tokType: int8(tokType),
+			invalid: invalid,
 		}
 	},
-	// 15: Closing PROCSINT
-	func(ch rune) option.Option[scannerTransition] {
-		switch ch {
-		case '>':
-			return scannerReduce(TOK_CLOSE_PROCINST, 0, true, false)
-		default:
-			return scannerNoTransition()
+	// scanCommentTag01
+	func(ch rune) scannerTransition {
+		isDash := ch == '-' // Shift, reduce to TOK_OPEN_COMMENT, go to scanCommentText
+		isInvalid := !isDash
+
+		bIsDash := boolToByte(isDash)
+
+		op := (bIsDash << scannerShift) + (bIsDash << scannerReduce)
+		tokType := TOK_OPEN_COMMENT
+		invalid := isInvalid
+		next := scanCommentText
+
+		return scannerTransition{
+			op:      op,
+			next:    int8(next),
+			tokType: int8(tokType),
+			invalid: invalid,
+		}
+	},
+	// scanCommentText
+	func(ch rune) scannerTransition {
+		isDash := ch == '-' // Shift, skip, reduce to TOK_STRING, go to scanClosingCommentTag
+		isSymbol := !isDash // Shift, go to scanCommentText
+
+		bIsDash := boolToByte(isDash)
+
+		op := (boolToByte(isDash || isSymbol) << scannerShift) + (bIsDash << scannerSkip) + (bIsDash << scannerReduce)
+		next := boolToInt8(isDash)*scanClosingCommentTag + boolToInt8(isSymbol)*scanCommentText
+		tokType := TOK_STRING
+
+		return scannerTransition{
+			op:      op,
+			next:    int8(next),
+			tokType: int8(tokType),
+		}
+	},
+	// scanClosingCommentTag
+	func(ch rune) scannerTransition {
+		isDash := ch == '-'  // Shift, skip, go to scanClosingCommentTag01
+		isInvalid := !isDash // Invalid transition
+
+		bIsDash := boolToByte(isDash)
+
+		op := (bIsDash << scannerShift) + (bIsDash << scannerSkip)
+		next := boolToInt8(isDash) * scanClosingCommentTag01
+
+		return scannerTransition{
+			op:      op,
+			next:    int8(next),
+			invalid: isInvalid,
+		}
+	},
+	// scanClosingCommentTag01
+	func(ch rune) scannerTransition {
+		isDash := ch == '-'  // Shift, skip, go to scanClosingCommentTag02
+		isInvalid := !isDash // Invalid transition
+
+		op := byte((1 << scannerShift) | (1 << scannerReduce))
+		next := scanClosingCommentTag02
+
+		return scannerTransition{
+			op:      op,
+			next:    int8(next),
+			invalid: isInvalid,
+		}
+	},
+	// scanClosingCommentTag02
+	func(ch rune) scannerTransition {
+		isClosingTag := ch == '>' // Shift, reduce to TOK_CLOSE_COMMENT, go to scanRoot
+		invalid := !isClosingTag
+
+		op := byte((1 << scannerShift) | (1 << scannerReduce))
+		next := scanRoot
+		tokType := TOK_CLOSE_COMMENT
+
+		return scannerTransition{
+			op:      op,
+			next:    int8(next),
+			tokType: int8(tokType),
+			invalid: invalid,
+		}
+	},
+	// scanInTag
+	func(ch rune) scannerTransition {
+		isLetter := unicode.IsLetter(ch)                      // Shift, go to scanInTagIdentifier
+		isWhiteSpace := ch == ' ' || ch == '\t' || ch == '\n' // Shift, skip go to scanInTag
+		isClosingProcInst := ch == '?'                        // Shift, go to scanClosingProcInst
+		isClosingTag := ch == '>'                             // Shift, reduce to TOK_CLOSE_ELEMENT_TAG, go to scanRoot
+		isEqual := ch == '='                                  // Shift, reduce to TOK_EQUAL, go to scanInTag
+		isPrefixSep := ch == ':'                              // Shift, reduce to TOK_PREFIX_SEP, go to scanInTag
+		isDoubleQuote := ch == '"'                            // Shift, skip, go to scanStringWithDoubleQuote
+		isSingleQuote := ch == '\''                           // Shift, skip, go to scanStringWithSingleQuote
+
+		invalid := !isLetter && !isWhiteSpace && !isClosingProcInst && !isClosingTag && !isEqual && !isPrefixSep && !isDoubleQuote && !isSingleQuote
+
+		op := (1 << scannerShift) +
+			(boolToByte(isWhiteSpace || isDoubleQuote || isSingleQuote) << scannerSkip) |
+			(boolToByte(isClosingTag || isEqual || isPrefixSep) << scannerReduce)
+
+		next := boolToInt8(isLetter)*scanInTagIdentifier +
+			boolToInt8(isWhiteSpace || isEqual || isPrefixSep)*scanInTag +
+			boolToInt8(isDoubleQuote)*scanStringWithDoubleQuote +
+			boolToInt8(isSingleQuote)*scanStringWithSingleQuote +
+			boolToInt8(isClosingProcInst)*scanClosingProcInst +
+			boolToInt8(isClosingTag)*scanRoot
+
+		tokType := boolToInt8(isClosingTag)*TOK_CLOSE_ELEMENT_TAG +
+			boolToInt8(isEqual)*TOK_EQUAL +
+			boolToInt8(isPrefixSep)*TOK_PREFIX_SEP
+
+		return scannerTransition{
+			op:      op,
+			next:    next,
+			tokType: tokType,
+			invalid: invalid,
+		}
+	},
+	// scanInTagIdentifier
+	func(ch rune) scannerTransition {
+		isIdentifierSymbol := unicode.IsLetter(ch) || unicode.IsDigit(ch) // Shift, go to scanInTagIdentifier
+		hasReachedEndOfIdentifier := !isIdentifierSymbol                  // Rewind, skip, reduce to TOK_ID, go to scanInTag
+
+		op := (boolToByte(isIdentifierSymbol) << scannerShift) +
+			(boolToByte(hasReachedEndOfIdentifier) << scannerReduce) +
+			(boolToByte(hasReachedEndOfIdentifier) << scannerSkip)
+
+		next := boolToInt8(isIdentifierSymbol)*scanInTagIdentifier + boolToInt8(hasReachedEndOfIdentifier)*scanInTag
+		tokType := TOK_ID
+
+		return scannerTransition{
+			op:      op,
+			next:    next,
+			tokType: int8(tokType),
+		}
+	},
+	// scanStringWithDoubleQuote
+	func(ch rune) scannerTransition {
+		isEndOfString := ch == '"'                      // Shift, skip, reduce to TOK_STRING, go to scanInTag
+		isEscaping := ch == '\\'                        // Shift, skip, go to scanStringEscapeWithDoubleQuote
+		isStringSymbol := !isEndOfString && !isEscaping // Shift, go to scanStringWithDoubleQuote
+
+		op := (1 << scannerShift) | (boolToByte(isEndOfString || isEscaping) << scannerSkip) | (boolToByte(isEndOfString) << scannerReduce)
+		next := boolToInt8(isEndOfString)*scanInTag + boolToInt8(isEscaping)*scanStringEscapeWithDoubleQuote + boolToInt8(isStringSymbol)*scanStringWithDoubleQuote
+		tokType := TOK_STRING
+
+		return scannerTransition{
+			op:      op,
+			next:    next,
+			tokType: int8(tokType),
+		}
+	},
+	// scanStringWithSingleQuote
+	func(ch rune) scannerTransition {
+		isEndOfString := ch == '\''                     // Shift, skip, reduce to TOK_STRING, go to scanInTag
+		isEscaping := ch == '\\'                        // Shift, skip, go to scanStringEscapeWithSingleQuote
+		isStringSymbol := !isEndOfString && !isEscaping // Shift, go to scanStringWithSingleQuote
+
+		op := (1 << scannerShift) | (boolToByte(isEndOfString || isEscaping) << scannerSkip) | (boolToByte(isEndOfString) << scannerReduce)
+		next := boolToInt8(isEndOfString)*scanInTag + boolToInt8(isEscaping)*scanStringEscapeWithSingleQuote + boolToInt8(isStringSymbol)*scanStringWithSingleQuote
+		tokType := TOK_STRING
+
+		return scannerTransition{
+			op:      op,
+			next:    next,
+			tokType: int8(tokType),
+		}
+	},
+	// scanStringEscapeWithDoubleQuote
+	func(ch rune) scannerTransition {
+		return scannerTransition{
+			op:   (1 << scannerShift),
+			next: scanStringEscapeWithDoubleQuote,
+		}
+	},
+	// scanStringEscapeWithSingleQuote
+	func(ch rune) scannerTransition {
+		return scannerTransition{
+			op:   (1 << scannerShift),
+			next: scanStringEscapeWithSingleQuote,
+		}
+	},
+	// scanText
+	func(ch rune) scannerTransition {
+		isEndOfText := ch == '<'     // Rewind, skip, reduce to TOK_STRING, go to scanRoot
+		isTextSymbol := !isEndOfText // Shift, go to scanText
+
+		op := (boolToByte(isTextSymbol) << scannerShift) | (boolToByte(isEndOfText) << scannerSkip) | (boolToByte(isEndOfText) << scannerReduce)
+		next := boolToInt8(isEndOfText)*scanRoot + boolToInt8(isTextSymbol)*scanText
+		tokType := TOK_STRING
+
+		return scannerTransition{
+			op:      op,
+			next:    next,
+			tokType: int8(tokType),
+		}
+	},
+	// scanClosingProcInst
+	func(ch rune) scannerTransition {
+		isClosingTag := ch == '>' // Shift, reduce to TOK_CLOSE_PROCINST, go to scanRoot
+
+		invalid := !isClosingTag
+
+		return scannerTransition{
+			op:      (1 << scannerShift) | (1 << scannerReduce),
+			next:    scanRoot,
+			tokType: TOK_CLOSE_PROCINST,
+			invalid: invalid,
 		}
 	},
 }
@@ -348,35 +395,52 @@ func (l *Scanner) Next() option.Option[result.Result[Token]] {
 			l.exhausted = true
 			return option.Some(result.Failed[Token](chRes.UnwrapError()))
 		}
-		ch := chRes.Expect()
-		transitionOpt := scannerStates[l.state](ch)
 
-		if transitionOpt.IsNone() {
+		ch := chRes.Expect()
+
+		// Call the state
+		transition := scannerStates[l.state](ch)
+
+		if transition.invalid {
 			l.exhausted = true
 			return option.Some(result.Failed[Token](errors.New(
 				fmt.Sprintf("Invalid character %s at col: %d, row: %d", string(ch), l.row, l.col),
 			)))
 		}
 
-		transition := transitionOpt.Expect()
 		l.state = transition.next
 
-		// Aggregate
-		if transition.op&scannerSkipOp == 0 {
-			l.accumulator = fmt.Sprintf("%s%s", l.accumulator, string(ch))
+		// Decode operation
+		skip := ((transition.op >> scannerSkip) & 1) == 1
+		rewind := ((transition.op >> scannerShift) & 1) == 0
+		reduce := ((transition.op >> scannerReduce) & 1) == 1
+
+		// No skip order, we add the symbol to the accumulator
+		if !skip {
+			l.accumulator = l.accumulator + string(ch)
 		}
 
-		// We don't shift, so we rewind
-		if transition.op&scannerShiftOp == 0 {
+		// We don't received a shift order, we rewind the symbol
+		if rewind {
 			l.rewindRune()
 		}
 
 		// We reduce
-		if transition.op&scannerReduceOp > 0 {
+		if reduce {
 			tok := l.reduce(transition.tokType)
+
+			// If the token is EOF, we raise exhausted flag
 			if tok.Type == TOK_EOF {
 				l.exhausted = true
 			}
+
+			if tok.Type == TOK_INVALID {
+				l.exhausted = true
+				return option.Some(result.Failed[Token](errors.New(
+					fmt.Sprintf("Invalid character %s at col: %d, row: %d", string(ch), l.row, l.col),
+				)))
+			}
+
 			return option.Some(result.Success(tok))
 		}
 	}

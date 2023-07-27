@@ -108,11 +108,11 @@ func NewElement(tag any, text string, flag byte, children []Element, attributes 
 }
 
 func NewTextElement(text string) Element {
-	return NewElement("#text", text, TextElementFlag, []Element{}, []Attribute{})
+	return NewElement("", text, TextElementFlag, []Element{}, []Attribute{})
 }
 
 func NewCommentElement(text string) Element {
-	return NewElement("#comment", text, CommentElementFlag, []Element{}, []Attribute{})
+	return NewElement("", text, CommentElementFlag, []Element{}, []Attribute{})
 }
 
 type Element struct {
@@ -124,7 +124,7 @@ type Element struct {
 }
 
 func (el Element) String() string {
-	return fmt.Sprintf("<%s attributes=%s text='%s'>", el.Tag, el.Attributes, el.Text)
+	return fmt.Sprintf("[Element name=\"%s\" attributes=%s text=\"%s\" flag=\"%d\">", el.Tag, el.Attributes, el.Text, el.Flag)
 }
 
 func (el *Element) AttachAttribute(attr Attribute) {

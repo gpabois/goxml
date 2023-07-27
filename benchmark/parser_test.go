@@ -1,6 +1,7 @@
 package benchmark
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -18,7 +19,9 @@ func BenchmarkParser(b *testing.B) {
 	stream := strings.NewReader(XML)
 
 	for n := 0; n < b.N; n++ {
-		parser := goxml.NewParser(stream, goxml.ParserArgs{Debug: true})
+		stream.Seek(0, io.SeekStart)
+
+		parser := goxml.NewParser(stream, goxml.ParserArgs{})
 		parser.Parse()
 	}
 }
