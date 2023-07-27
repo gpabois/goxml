@@ -43,6 +43,7 @@ const (
 	scanStringEscapeWithSingleQuote
 	scanText
 	scanClosingProcInst
+	scanClosingSingleTag
 )
 
 // Contains all possible states of the scanner
@@ -203,13 +204,14 @@ var scannerStates = []scannerState{
 		isLetter := unicode.IsLetter(ch)                      // Shift, go to scanInTagIdentifier
 		isWhiteSpace := ch == ' ' || ch == '\t' || ch == '\n' // Shift, skip go to scanInTag
 		isClosingProcInst := ch == '?'                        // Shift, go to scanClosingProcInst
+		isClosingSingleElement := ch == '/'                   // Shift, goto scanClosingSingleTag
 		isClosingTag := ch == '>'                             // Shift, reduce to TOK_CLOSE_ELEMENT_TAG, go to scanRoot
 		isEqual := ch == '='                                  // Shift, reduce to TOK_EQUAL, go to scanInTag
 		isPrefixSep := ch == ':'                              // Shift, reduce to TOK_PREFIX_SEP, go to scanInTag
 		isDoubleQuote := ch == '"'                            // Shift, skip, go to scanStringWithDoubleQuote
 		isSingleQuote := ch == '\''                           // Shift, skip, go to scanStringWithSingleQuote
 
-		invalid := !isLetter && !isWhiteSpace && !isClosingProcInst && !isClosingTag && !isEqual && !isPrefixSep && !isDoubleQuote && !isSingleQuote
+		invalid := !isLetter && !isWhiteSpace && !isClosingProcInst && !isClosingTag && !isEqual && !isPrefixSep && !isDoubleQuote && !isSingleQuote && !isClosingSingleElement
 
 		op := (1 << scannerShift) +
 			(boolToByte(isWhiteSpace || isDoubleQuote || isSingleQuote) << scannerSkip) |
@@ -220,7 +222,8 @@ var scannerStates = []scannerState{
 			boolToInt8(isDoubleQuote)*scanStringWithDoubleQuote +
 			boolToInt8(isSingleQuote)*scanStringWithSingleQuote +
 			boolToInt8(isClosingProcInst)*scanClosingProcInst +
-			boolToInt8(isClosingTag)*scanRoot
+			boolToInt8(isClosingTag)*scanRoot +
+			boolToInt8(isClosingSingleElement)*scanClosingSingleTag
 
 		tokType := boolToInt8(isClosingTag)*TOK_CLOSE_ELEMENT_TAG +
 			boolToInt8(isEqual)*TOK_EQUAL +
@@ -322,6 +325,18 @@ var scannerStates = []scannerState{
 			op:      (1 << scannerShift) | (1 << scannerReduce),
 			next:    scanRoot,
 			tokType: TOK_CLOSE_PROCINST,
+			invalid: invalid,
+		}
+	},
+	// scanClosingSingleTag
+	func(ch rune) scannerTransition {
+		isClosingTag := ch == '>' // Shift, reduce to TOK_CLOSE_SINGLE_ELEMENT_TAG, go to scanRoot
+		invalid := !isClosingTag
+
+		return scannerTransition{
+			op:      (1 << scannerShift) | (1 << scannerReduce),
+			next:    scanRoot,
+			tokType: TOK_CLOSE_SINGLE_ELEMENT_TAG,
 			invalid: invalid,
 		}
 	},
