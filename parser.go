@@ -70,6 +70,7 @@ const (
 	parseOpeningTagElement
 	parseElementAttribute
 	parseElementAttributeName01
+	parseElementAttributeName02
 	parseElementAttributeValue
 	parseClosingTagElement
 	parseClosingTagNameElement01
@@ -92,6 +93,7 @@ var expectedTokens = [][]string{
 	{"identifier", "/>", ">"},
 	{":", "="},
 	{"identifier"},
+	{"="},
 	{"string"},
 	{"identifier"},
 	{},
@@ -249,11 +251,26 @@ var parserStates = []parserState{
 
 		invalid := !isIdentifier
 		op := (1 << parserShift) | (1 << parserPushTokenValue) | (1 << parserReduceQNameWithPrefix)
-		next := parseElementAttribute
+		next := parseElementAttributeName02
 
 		return parserTransition{
 			op:      int16(op),
 			next:    int8(next),
+			invalid: invalid,
+		}
+	},
+	// parseElementAttributeName02
+	func(tok Token) parserTransition {
+		isEqual := tok.Type == TOK_EQUAL // shift, go to parseElementAttributeValue
+		invalid := !isEqual
+
+		op := (1 << parserShift)
+
+		next := boolToInt8(isEqual) * parseElementAttributeValue
+
+		return parserTransition{
+			op:      int16(op),
+			next:    next,
 			invalid: invalid,
 		}
 	},

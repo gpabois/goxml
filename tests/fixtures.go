@@ -21,7 +21,7 @@ var XML_DOC = goxml.NewDocument([]goxml.Element{
 			goxml.NewElement("para", "", 0,
 				[]goxml.Element{
 					goxml.NewTextElement("hello world"),
-					goxml.NewElement("foo", "", 0, []goxml.Element{
+					goxml.NewElement("graph", "", 0, []goxml.Element{
 						goxml.NewTextElement("else"),
 					}, []goxml.Attribute{}),
 				},
