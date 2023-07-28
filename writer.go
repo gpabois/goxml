@@ -35,15 +35,19 @@ func (el *Element) WriteTo(w io.Writer, args WriteArgs) {
 		io.WriteString(w, "<")
 		io.WriteString(w, el.Tag.String())
 		writeAttributes(w, el, args)
-		io.WriteString(w, ">")
+		if (el.Flag & SingleElementFlag) == SingleElementFlag {
+			io.WriteString(w, "/>")
+		} else {
+			io.WriteString(w, ">")
 
-		writeChildren(w, el, args)
+			writeChildren(w, el, args)
 
-		io.WriteString(w, "\n")
-		io.WriteString(w, strings.Repeat(" ", args.Level*2))
-		io.WriteString(w, "</")
-		io.WriteString(w, el.Tag.String())
-		io.WriteString(w, ">")
+			io.WriteString(w, "\n")
+			io.WriteString(w, strings.Repeat(" ", args.Level*2))
+			io.WriteString(w, "</")
+			io.WriteString(w, el.Tag.String())
+			io.WriteString(w, ">")
+		}
 	}
 }
 

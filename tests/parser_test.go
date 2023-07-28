@@ -41,7 +41,7 @@ func Test_Parser_ComplexDocument(t *testing.T) {
 	parser := goxml.NewParser(stream, goxml.ParserArgs{Debug: true})
 	defer func() {
 		fmt.Println("=== PARSER TRACE ===")
-		fmt.Println(strings.Join(parser.GetTrace(), "\n"))
+		fmt.Println(strings.Join(parser.GetDebugTrace(), "\n"))
 		fmt.Println("=== END OF PARSER TRACE ===")
 	}()
 	docRes := parser.Parse()
@@ -58,7 +58,7 @@ func Test_Parser(t *testing.T) {
 
 	defer func() {
 		fmt.Println("=== PARSER TRACE ===")
-		fmt.Println(strings.Join(parser.GetTrace(), "\n"))
+		fmt.Println(strings.Join(parser.GetDebugTrace(), "\n"))
 		fmt.Println("=== END OF PARSER TRACE ===")
 	}()
 

@@ -65,6 +65,7 @@ func (attr Attribute) String() string {
 const ProcInstFlag = 0b1
 const TextElementFlag = 0b10
 const CommentElementFlag = 0b100
+const SingleElementFlag = 0b1000
 
 func parseQName(name any) QName {
 	qname := QName{}
@@ -157,6 +158,26 @@ type Element struct {
 	Children   []Element
 	Attributes Attributes
 	Flag       byte
+}
+
+// Iterate over namespaces declarations at the element level
+func (el *Element) IterNamespacesDeclarations() iter.Iterator[Attribute] {
+	return iter.Filter(el.Attributes.Iter(), func(a Attribute) bool {
+		return a.Name.Local == "xmnls" || a.Name.Prefix == option.Some("xmlns")
+	})
+}
+
+// Declare a namespace at the element level
+func (el *Element) DeclareNamespace(uri string, prefix option.Option[string]) {
+	attr := Attribute{Name: QName{Local: "xlmns"}}
+	if prefix.IsSome() {
+		attr.Name.Prefix = option.Some("xlmns")
+		attr.Name.Local = prefix.Expect()
+	}
+}
+
+func (el *Element) IterAttributes() iter.Iterator[Attribute] {
+	return el.Attributes.Iter()
 }
 
 func (el Element) String() string {

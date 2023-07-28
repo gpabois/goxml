@@ -209,14 +209,15 @@ var parserStates = []parserState{
 	// parseOpeningTagElement
 	func(tok Token) parserTransition {
 		isIdentifier := tok.Type == TOK_ID                                  // Shift, push token value, go to parseElementAttribute
-		isCloseSingleElementTag := tok.Type == TOK_CLOSE_SINGLE_ELEMENT_TAG // Shift, reduce element go to parseElements
+		isCloseSingleElementTag := tok.Type == TOK_CLOSE_SINGLE_ELEMENT_TAG // Shift, push flag, reduce flag, reduce element go to parseElements
 		isCloseElementTag := tok.Type == TOK_CLOSE_ELEMENT_TAG              // Shift, go to parseElements
 
 		invalid := !isIdentifier && !isCloseSingleElementTag && !isCloseElementTag
 
 		op := (1 << parserShift) |
 			(boolToInt16(isIdentifier) << parserPushTokenValue) |
-			(boolToInt16(isCloseSingleElementTag) << parserReduceElement)
+			(boolToInt16(isCloseSingleElementTag) << parserReduceElement) |
+			(boolToInt16(isCloseSingleElementTag) << parserReduceFlag)
 
 		next := boolToInt8(isIdentifier)*parseElementAttribute +
 			boolToInt8(isCloseSingleElementTag || isCloseElementTag)*parseElements
@@ -224,6 +225,7 @@ var parserStates = []parserState{
 		return parserTransition{
 			op:      op,
 			next:    next,
+			flag:    SingleElementFlag,
 			invalid: invalid,
 		}
 	},
@@ -447,7 +449,7 @@ func (p *Parser) trace(f func() string) {
 	}
 }
 
-func (p *Parser) GetTrace() []string {
+func (p *Parser) GetDebugTrace() []string {
 	return p.logs
 }
 
@@ -487,7 +489,7 @@ func (p *Parser) Parse() result.Result[Document] {
 		}
 
 		p.trace(func() string {
-			return fmt.Sprintf("state #%d, token: %s", p.state, tok)
+			return fmt.Sprintf("goxml::parser - state #%d, token: %s", p.state, tok)
 		})
 
 		// Decode operations
@@ -507,25 +509,25 @@ func (p *Parser) Parse() result.Result[Document] {
 		if !shift {
 			p.rewindToken(tok)
 			p.trace(func() string {
-				return fmt.Sprintf("rewinding")
+				return fmt.Sprintf("goxml::parser - rewind")
 			})
 		} else {
 			p.trace(func() string {
-				return fmt.Sprintf("shifting")
+				return fmt.Sprintf("goxml::parser - shift")
 			})
 		}
 
 		// Push commands
 		if pushElement {
 			p.trace(func() string {
-				return fmt.Sprintf("pushing new element")
+				return fmt.Sprintf("goxml::parser - push new element")
 			})
 			p.elStack.Push(Element{Children: []Element{}})
 		}
 
 		if pushTokenValue {
 			p.trace(func() string {
-				return fmt.Sprintf("pushing token value \"%s\"", tok.Value)
+				return fmt.Sprintf("goxml::parser - push token value \"%s\"", tok.Value)
 			})
 			p.stack.Push(tok.Value)
 		}
@@ -535,7 +537,7 @@ func (p *Parser) Parse() result.Result[Document] {
 			element := p.elStack.Last().Expect()
 			element.Flag = element.Flag | transition.flag
 			p.trace(func() string {
-				return fmt.Sprintf("reducing flag %d in %s", transition.flag, element)
+				return fmt.Sprintf("goxml::parser - reduce flag %d in %s", transition.flag, element)
 			})
 		}
 
@@ -545,7 +547,7 @@ func (p *Parser) Parse() result.Result[Document] {
 			text := p.stack.Pop().Expect().(string)
 			element.Text = text
 			p.trace(func() string {
-				return fmt.Sprintf("reducing text %s in %s", text, element)
+				return fmt.Sprintf("goxml::parser - reduce text %s in %s", text, element)
 			})
 		}
 
@@ -555,7 +557,7 @@ func (p *Parser) Parse() result.Result[Document] {
 			qname := QName{Local: local}
 			p.stack.Push(qname)
 			p.trace(func() string {
-				return fmt.Sprintf("reducing QName %s", qname)
+				return fmt.Sprintf("goxml::parser - reduce QName %s", qname)
 			})
 		}
 
@@ -566,7 +568,7 @@ func (p *Parser) Parse() result.Result[Document] {
 			qname := QName{Local: local, Prefix: option.Some(prefix)}
 			p.stack.Push(qname)
 			p.trace(func() string {
-				return fmt.Sprintf("reducing QName (with prefix) %s", qname)
+				return fmt.Sprintf("goxml::parser - reduce QName (with prefix) %s", qname)
 			})
 		}
 
@@ -575,7 +577,7 @@ func (p *Parser) Parse() result.Result[Document] {
 			qname := p.stack.Pop().Expect().(QName)
 			element.Tag = qname
 			p.trace(func() string {
-				return fmt.Sprintf("reducing tag name %s in %s", qname, element)
+				return fmt.Sprintf("goxml::parser - reduce tag name %s in %s", qname, element)
 			})
 		}
 
@@ -590,7 +592,7 @@ func (p *Parser) Parse() result.Result[Document] {
 			}
 			element.AttachAttribute(attr)
 			p.trace(func() string {
-				return fmt.Sprintf("reducing attribute %s in %s", attr, element)
+				return fmt.Sprintf("goxml::parser - reducing attribute %s in %s", attr, element)
 			})
 		}
 
@@ -603,7 +605,7 @@ func (p *Parser) Parse() result.Result[Document] {
 		p.state = transition.next
 
 		p.trace(func() string {
-			return fmt.Sprintf("go to #%d", transition.next)
+			return fmt.Sprintf("goxml::parser - go to #%d", transition.next)
 		})
 
 	}
