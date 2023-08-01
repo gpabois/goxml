@@ -99,6 +99,12 @@ func (s *BaseXPath3Listener) EnterSimpleLetClause(ctx *SimpleLetClauseContext) {
 // ExitSimpleLetClause is called when production simpleLetClause is exited.
 func (s *BaseXPath3Listener) ExitSimpleLetClause(ctx *SimpleLetClauseContext) {}
 
+// EnterLetBindingList is called when production letBindingList is entered.
+func (s *BaseXPath3Listener) EnterLetBindingList(ctx *LetBindingListContext) {}
+
+// ExitLetBindingList is called when production letBindingList is exited.
+func (s *BaseXPath3Listener) ExitLetBindingList(ctx *LetBindingListContext) {}
+
 // EnterSimpleLetBinding is called when production simpleLetBinding is entered.
 func (s *BaseXPath3Listener) EnterSimpleLetBinding(ctx *SimpleLetBindingContext) {}
 
@@ -110,6 +116,18 @@ func (s *BaseXPath3Listener) EnterQuantifiedExpr(ctx *QuantifiedExprContext) {}
 
 // ExitQuantifiedExpr is called when production quantifiedExpr is exited.
 func (s *BaseXPath3Listener) ExitQuantifiedExpr(ctx *QuantifiedExprContext) {}
+
+// EnterQuantifiedBindingList is called when production quantifiedBindingList is entered.
+func (s *BaseXPath3Listener) EnterQuantifiedBindingList(ctx *QuantifiedBindingListContext) {}
+
+// ExitQuantifiedBindingList is called when production quantifiedBindingList is exited.
+func (s *BaseXPath3Listener) ExitQuantifiedBindingList(ctx *QuantifiedBindingListContext) {}
+
+// EnterSimpleQuantifiedBinding is called when production simpleQuantifiedBinding is entered.
+func (s *BaseXPath3Listener) EnterSimpleQuantifiedBinding(ctx *SimpleQuantifiedBindingContext) {}
+
+// ExitSimpleQuantifiedBinding is called when production simpleQuantifiedBinding is exited.
+func (s *BaseXPath3Listener) ExitSimpleQuantifiedBinding(ctx *SimpleQuantifiedBindingContext) {}
 
 // EnterIfExpr is called when production ifExpr is entered.
 func (s *BaseXPath3Listener) EnterIfExpr(ctx *IfExprContext) {}
@@ -129,11 +147,17 @@ func (s *BaseXPath3Listener) EnterAndExpr(ctx *AndExprContext) {}
 // ExitAndExpr is called when production andExpr is exited.
 func (s *BaseXPath3Listener) ExitAndExpr(ctx *AndExprContext) {}
 
-// EnterStringConcatexpr is called when production stringConcatexpr is entered.
-func (s *BaseXPath3Listener) EnterStringConcatexpr(ctx *StringConcatexprContext) {}
+// EnterComparisonExpr is called when production comparisonExpr is entered.
+func (s *BaseXPath3Listener) EnterComparisonExpr(ctx *ComparisonExprContext) {}
 
-// ExitStringConcatexpr is called when production stringConcatexpr is exited.
-func (s *BaseXPath3Listener) ExitStringConcatexpr(ctx *StringConcatexprContext) {}
+// ExitComparisonExpr is called when production comparisonExpr is exited.
+func (s *BaseXPath3Listener) ExitComparisonExpr(ctx *ComparisonExprContext) {}
+
+// EnterStringConcatExpr is called when production stringConcatExpr is entered.
+func (s *BaseXPath3Listener) EnterStringConcatExpr(ctx *StringConcatExprContext) {}
+
+// ExitStringConcatExpr is called when production stringConcatExpr is exited.
+func (s *BaseXPath3Listener) ExitStringConcatExpr(ctx *StringConcatExprContext) {}
 
 // EnterRangeExpr is called when production rangeExpr is entered.
 func (s *BaseXPath3Listener) EnterRangeExpr(ctx *RangeExprContext) {}

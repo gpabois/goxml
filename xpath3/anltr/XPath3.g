@@ -15,46 +15,89 @@ exprSingle
 	| quantifiedExpr
 	| ifExpr
 	| orExpr;
-	
+
+// For Expression
 forExpr	: simpleForClause 'return' exprSingle;
-simpleForClause: 'for' simpleForBinding (',' simpleForBinding)*;
+simpleForClause: 'for' forBindingList;
 forBindingList : simpleForBinding
 				| forBindingList ',' simpleForBinding;
 simpleForBinding: '$' varName 'in' exprSingle;
-letExpr	:	simpleLetClause 'return' exprSingle;
-simpleLetClause
-	:	'let' simpleLetBinding (',' simpleLetBinding)*;
+
+// Let Expression
+letExpr	: simpleLetClause 'return' exprSingle;
+simpleLetClause : 'let' letBindingList;
+letBindingList : simpleLetClause
+			   | letBindingList ',' simpleLetBinding;
 simpleLetBinding
 	:	'$' varName ':=' exprSingle;
 
+// Quantified Expression
 quantifiedExpr
-	:	('some' | 'any') '$' varName 'in' exprSingle (',' '$' varName 'in' exprSingle)* 'satisfies' exprSingle;
+	:	('some' | 'any') quantifiedBindingList 'satisfies' exprSingle;
+quantifiedBindingList : simpleQuantifiedBinding 
+						|  quantifiedBindingList ',' simpleQuantifiedBinding;
+simpleQuantifiedBinding : '$' varName 'in' exprSingle;
 
+// If expression
 ifExpr	:	'if' '(' expr ')' 'then' exprSingle 'else' exprSingle;
-orExpr	:	andExpr ('or' andExpr)*;
-andExpr	:	stringConcatexpr ((valueComp | generalComp | nodeComp) stringConcatexpr)?;
-stringConcatexpr
-	:	rangeExpr ('||' rangeExpr)*;
-rangeExpr
-	:	additiveExpr ('to' additiveExpr)?;
-additiveExpr
-	:	multiplicativeExpr (('+' | '-') multiplicativeExpr)*;
-multiplicativeExpr
-	:	unionExpr (('*'|'div'|'idiv'|'mod') unionExpr)*;
+
+// Or expression
+orExpr	: andExpr
+		| orExpr 'or' andExpr;
+
+// And expression
+andExpr	: comparisonExpr
+		| andExpr 'and' comparisonExpr;
+
+// Comparison expression
+comparisonExpr : stringConcatExpr
+			   | stringConcatExpr (valueComp | generalComp | nodeComp) stringConcatExpr;
+
+// String concat expression
+stringConcatExpr :	rangeExpr
+				 | stringConcatExpr '||' rangeExpr;
+
+// Range expression
+rangeExpr 	: additiveExpr
+			| rangeExpr 'to' additiveExpr;
+
+// Additive expression
+additiveExpr :	multiplicativeExpr 
+			 | additiveExpr ('+' | '-') multiplicativeExpr;
+
+// Multiplicative expression
+multiplicativeExpr : unionExpr 
+					| multiplicativeExpr ('*'|'div'|'idiv'|'mod') unionExpr;
+
+// Union expression
 unionExpr
-	:	intersectExceptExpr (('union'|'|') intersectExceptExpr)*;
-intersectExceptExpr
-	:	instanceofExpr (('intersect'|'except') instanceofExpr)*;
-instanceofExpr
-	:	treatExpr ('instance' 'of' sequenceType)?;
-treatExpr
-	:	castableExpr ('treat' 'as' sequenceType)?;
-castableExpr
-	:	castExpr ('castable' 'as' singleType)?;
-castExpr
-	:	unaryExpr ('cast' 'as' singleType)?;
-unaryExpr
-	:	('+'|'-')* valueExpr;
+	:	intersectExceptExpr 
+	| unionExpr ('union'|'|') intersectExceptExpr;
+
+// Intersect or except expression
+intersectExceptExpr : instanceofExpr 
+					| intersectExceptExpr ('intersect'|'except') instanceofExpr;
+
+// InstanceOf expression
+instanceofExpr : treatExpr 
+				| treatExpr 'instance' 'of' sequenceType;
+
+// Treat expression
+treatExpr :	castableExpr 
+		  | castableExpr 'treat' 'as' sequenceType;
+
+// Castable expression
+castableExpr : castExpr
+			 | castExpr 'castable' 'as' singleType;
+
+// Cast expression
+castExpr : unaryExpr
+		 | unaryExpr 'cast' 'as' singleType;
+
+// Unary expression	
+unaryExpr :	valueExpr
+		  | '-' unaryExpr
+		  | '+' unaryExpr;
 valueExpr
 	:	simpleMapExpr;
 generalComp

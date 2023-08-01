@@ -47,11 +47,20 @@ type XPath3Listener interface {
 	// EnterSimpleLetClause is called when entering the simpleLetClause production.
 	EnterSimpleLetClause(c *SimpleLetClauseContext)
 
+	// EnterLetBindingList is called when entering the letBindingList production.
+	EnterLetBindingList(c *LetBindingListContext)
+
 	// EnterSimpleLetBinding is called when entering the simpleLetBinding production.
 	EnterSimpleLetBinding(c *SimpleLetBindingContext)
 
 	// EnterQuantifiedExpr is called when entering the quantifiedExpr production.
 	EnterQuantifiedExpr(c *QuantifiedExprContext)
+
+	// EnterQuantifiedBindingList is called when entering the quantifiedBindingList production.
+	EnterQuantifiedBindingList(c *QuantifiedBindingListContext)
+
+	// EnterSimpleQuantifiedBinding is called when entering the simpleQuantifiedBinding production.
+	EnterSimpleQuantifiedBinding(c *SimpleQuantifiedBindingContext)
 
 	// EnterIfExpr is called when entering the ifExpr production.
 	EnterIfExpr(c *IfExprContext)
@@ -62,8 +71,11 @@ type XPath3Listener interface {
 	// EnterAndExpr is called when entering the andExpr production.
 	EnterAndExpr(c *AndExprContext)
 
-	// EnterStringConcatexpr is called when entering the stringConcatexpr production.
-	EnterStringConcatexpr(c *StringConcatexprContext)
+	// EnterComparisonExpr is called when entering the comparisonExpr production.
+	EnterComparisonExpr(c *ComparisonExprContext)
+
+	// EnterStringConcatExpr is called when entering the stringConcatExpr production.
+	EnterStringConcatExpr(c *StringConcatExprContext)
 
 	// EnterRangeExpr is called when entering the rangeExpr production.
 	EnterRangeExpr(c *RangeExprContext)
@@ -329,11 +341,20 @@ type XPath3Listener interface {
 	// ExitSimpleLetClause is called when exiting the simpleLetClause production.
 	ExitSimpleLetClause(c *SimpleLetClauseContext)
 
+	// ExitLetBindingList is called when exiting the letBindingList production.
+	ExitLetBindingList(c *LetBindingListContext)
+
 	// ExitSimpleLetBinding is called when exiting the simpleLetBinding production.
 	ExitSimpleLetBinding(c *SimpleLetBindingContext)
 
 	// ExitQuantifiedExpr is called when exiting the quantifiedExpr production.
 	ExitQuantifiedExpr(c *QuantifiedExprContext)
+
+	// ExitQuantifiedBindingList is called when exiting the quantifiedBindingList production.
+	ExitQuantifiedBindingList(c *QuantifiedBindingListContext)
+
+	// ExitSimpleQuantifiedBinding is called when exiting the simpleQuantifiedBinding production.
+	ExitSimpleQuantifiedBinding(c *SimpleQuantifiedBindingContext)
 
 	// ExitIfExpr is called when exiting the ifExpr production.
 	ExitIfExpr(c *IfExprContext)
@@ -344,8 +365,11 @@ type XPath3Listener interface {
 	// ExitAndExpr is called when exiting the andExpr production.
 	ExitAndExpr(c *AndExprContext)
 
-	// ExitStringConcatexpr is called when exiting the stringConcatexpr production.
-	ExitStringConcatexpr(c *StringConcatexprContext)
+	// ExitComparisonExpr is called when exiting the comparisonExpr production.
+	ExitComparisonExpr(c *ComparisonExprContext)
+
+	// ExitStringConcatExpr is called when exiting the stringConcatExpr production.
+	ExitStringConcatExpr(c *StringConcatExprContext)
 
 	// ExitRangeExpr is called when exiting the rangeExpr production.
 	ExitRangeExpr(c *RangeExprContext)
