@@ -8,26 +8,24 @@ type LetExpr struct {
 }
 
 // Generate ForExpr
-func (v *xPathAstVisitor) ExitLetExpr(c *parser.XPathContext) {
+func (v *xPathAstVisitor) ExitLetExpr(c *parser.LetExprContext) {
 	bindings, expr := v.stack.Pop().Expect().(Bindings), v.stack.Pop()
 	v.stack.Push(LetExpr{Bindings: bindings, Expr: expr})
 }
 
 // Generate Bindings
-func (v *xPathAstVisitor) ExitLetBindingList(c *parser.XPathContext) {
-	switch c.GetAltNumber() {
+func (v *xPathAstVisitor) ExitLetBindingList(c *parser.LetBindingListContext) {
+	switch c.LetBindingList() {
 	// letBindingList : simpleLetBinding
-	case 0:
-		v.stack.Push(Bindings{v.stack.Pop().Expect().(Binding)})
+	case nil:
+		v.reduceBindingsFromSimpleBinding()
 	// letBindingList : letBindingList ',' simpleLetBinding
-	case 1:
-		left, right := v.stack.Pop().Expect().(Bindings), v.stack.Pop().Expect().(Binding)
-		left = append(left, right)
-		v.stack.Push(left)
+	default:
+		v.reduceBindings()
 	}
 }
 
-func (v *xPathAstVisitor) ExitLetSimpleForBinding(c *parser.XPathContext) {
+func (v *xPathAstVisitor) ExitLetSimpleForBinding(c *parser.SimpleForBindingContext) {
 	varName, expr := v.stack.Pop().Expect().(string), v.stack.Pop().Expect()
 	v.stack.Push(Binding{
 		Symbol: varName,

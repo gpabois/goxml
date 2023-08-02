@@ -1,4 +1,4 @@
-// Generated from /Users/gpabois/dev/goxml/xpath3/anltr/XPath3.g by ANTLR 4.9.2
+// Generated from c:\Users\gael.pabois\dev\goxml\xpath3\anltr\XPath3.g by ANTLR 4.9.2
 import org.antlr.v4.runtime.Lexer;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.Token;

@@ -21,4 +21,16 @@ type xPathAstVisitor struct {
 	stack collection.Stack[any]
 }
 
+// bindings := simpleBinding
+func (v *xPathAstVisitor) reduceBindingsFromSimpleBinding() {
+	v.stack.Push(Bindings{v.stack.Pop().Expect().(Binding)})
+}
+
+// bindings := bindings, simpleBinding
+func (v *xPathAstVisitor) reduceBindings() {
+	left, right := v.stack.Pop().Expect().(Bindings), v.stack.Pop().Expect().(Binding)
+	left = append(left, right)
+	v.stack.Push(left)
+}
+
 func ParseXPathWithString(xpath string)

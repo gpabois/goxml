@@ -8,7 +8,8 @@ param : '$' eqName type_declaration?;
 
 functionBody : enclosedExpr;
 enclosedExpr :	'{' expr '}';
-expr : exprSingle (',' exprSingle)*;
+expr : exprSingle
+	 | expr ',' exprSingle;
 exprSingle
 	: forExpr
 	| letExpr
@@ -33,7 +34,7 @@ simpleLetBinding
 
 // Quantified Expression
 quantifiedExpr
-	:	('some' | 'any') quantifiedBindingList 'satisfies' exprSingle;
+	:	quantifiedOp=('some' | 'any') quantifiedBindingList 'satisfies' exprSingle;
 quantifiedBindingList : simpleQuantifiedBinding 
 						|  quantifiedBindingList ',' simpleQuantifiedBinding;
 simpleQuantifiedBinding : '$' varName 'in' exprSingle;
@@ -63,20 +64,20 @@ rangeExpr 	: additiveExpr
 
 // Additive expression
 additiveExpr :	multiplicativeExpr 
-			 | additiveExpr ('+' | '-') multiplicativeExpr;
+			 | additiveExpr additiveOp=('+' | '-') multiplicativeExpr;
 
 // Multiplicative expression
 multiplicativeExpr : unionExpr 
-					| multiplicativeExpr ('*'|'div'|'idiv'|'mod') unionExpr;
+					| multiplicativeExpr multiplicativeOp=('*'|'div'|'idiv'|'mod') unionExpr;
 
 // Union expression
 unionExpr
 	:	intersectExceptExpr 
-	| unionExpr ('union'|'|') intersectExceptExpr;
+	| unionExpr unionOp=('union'|'|') intersectExceptExpr;
 
 // Intersect or except expression
 intersectExceptExpr : instanceofExpr 
-					| intersectExceptExpr ('intersect'|'except') instanceofExpr;
+					| intersectExceptExpr intersectExceptOp=('intersect'|'except') instanceofExpr;
 
 // InstanceOf expression
 instanceofExpr : treatExpr 
@@ -113,7 +114,7 @@ pathExpr
 	| 	('//' relativePathExpr)
 	|	relativePathExpr;
 relativePathExpr 
-	:	stepExpr (('/' | '//') stepExpr)*;
+	:	stepExpr (stepOp=('/' | '//') stepExpr)*;
 stepExpr 
 	:	postfixExpr | axisStep;
 axisStep 
@@ -131,7 +132,7 @@ forwardAxis
 	| 	('namespace' '::');
 	
 abbrevForwardStep 
-	:	'@'? nodeTest;
+	:	abbvOp='@'? nodeTest;
 reverseStep 
 	:	(reverseAxis nodeTest) | abbrevReverseStep;
 reverseAxis 
