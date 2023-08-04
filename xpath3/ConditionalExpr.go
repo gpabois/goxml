@@ -2,8 +2,9 @@ package xpath3
 
 import parser "github.com/gpabois/goxml/xpath3/anltr"
 
-// ifExpr: if' '(' expr ')' 'then' exprSingle 'else' exprSingle;
-type IfExpr struct {
+// XPath 3.1 supports a conditional expression based on the keywords if, then, and else.
+// Ex: if ($widget1/unit-cost < $widget2/unit-cost) then $widget1 else $widget2
+type ConditionalExpr struct {
 	Predicates Expressions
 	ThenExpr   any
 	ElseExpr   any
@@ -14,7 +15,7 @@ func (v *xPathAstVisitor) ExitIfExpr(c *parser.IForExprContext) {
 	thenExpr := v.stack.Pop().Expect()
 	elseExpr := v.stack.Pop().Expect()
 
-	v.stack.Push(IfExpr{
+	v.stack.Push(ConditionalExpr{
 		Predicates: predicates,
 		ThenExpr:   thenExpr,
 		ElseExpr:   elseExpr,

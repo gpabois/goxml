@@ -2,6 +2,8 @@ package xpath3
 
 import parser "github.com/gpabois/goxml/xpath3/anltr"
 
+// Quantified expressions support existential and universal quantification. The value of a quantified expression is always true or false.
+// Ex: every $part in /parts/part satisfies $part/@discounted
 type QuantifiedExpr struct {
 	Operation string
 	Bindings  Bindings

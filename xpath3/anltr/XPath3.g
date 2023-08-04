@@ -108,19 +108,27 @@ valueComp
 nodeComp
 	:	'is' | '<<' | '>>';
 simpleMapExpr
-	:	pathExpr ('!' pathExpr)*;
+	: pathExpr 
+	| simpleMapExpr simpleMapOp='!' pathExpr;
+
 pathExpr 
-	:	('/' relativePathExpr?)
-	| 	('//' relativePathExpr)
+	:	(abbvStep='/' relativePathExpr?)
+	| 	(abbvStep='//' relativePathExpr)
 	|	relativePathExpr;
+
 relativePathExpr 
-	:	stepExpr (stepOp=('/' | '//') stepExpr)*;
+	:	stepExpr
+	| relativePathExpr stepOp=('/' | '//') stepExpr;
+	
 stepExpr 
 	:	postfixExpr | axisStep;
+
 axisStep 
 	:	(reverseStep | forwardStep) predicateList;
+
 forwardStep 
 	:	(forwardAxis nodeTest) | abbrevForwardStep;
+
 forwardAxis 
 	:	 ('child' '::')
 	| 	('descendant' '::')

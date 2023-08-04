@@ -13,7 +13,7 @@ func (v *xPathAstVisitor) ExitComparisonExpr(c *parser.AndExprContext) {
 	case nil:
 		//
 	default:
-		left := v.stack.Pop().Expect().(AndExpr)
+		left := v.stack.Pop().Expect()
 		op := v.stack.Pop().Expect().(string)
 		right := v.stack.Pop().Expect()
 
