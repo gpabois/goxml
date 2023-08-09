@@ -167,6 +167,9 @@ type XPath3Listener interface {
 	// EnterArgumentList is called when entering the argumentList production.
 	EnterArgumentList(c *ArgumentListContext)
 
+	// EnterArguments is called when entering the arguments production.
+	EnterArguments(c *ArgumentsContext)
+
 	// EnterPredicateList is called when entering the predicateList production.
 	EnterPredicateList(c *PredicateListContext)
 
@@ -460,6 +463,9 @@ type XPath3Listener interface {
 
 	// ExitArgumentList is called when exiting the argumentList production.
 	ExitArgumentList(c *ArgumentListContext)
+
+	// ExitArguments is called when exiting the arguments production.
+	ExitArguments(c *ArgumentsContext)
 
 	// ExitPredicateList is called when exiting the predicateList production.
 	ExitPredicateList(c *PredicateListContext)

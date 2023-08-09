@@ -124,10 +124,12 @@ stepExpr
 	:	postfixExpr | axisStep;
 
 axisStep 
-	:	(reverseStep | forwardStep) predicateList;
+	:	reverseStep predicateList
+	| 	forwardStep predicateList;
 
 forwardStep 
-	:	(forwardAxis nodeTest) | abbrevForwardStep;
+	: forwardAxis nodeTest
+	| abbrevForwardStep;
 
 forwardAxis 
 	:	 ('child' '::')
@@ -160,14 +162,26 @@ wildCard
 	|	(NC_NAME ':' '*')
 	|	('*' ':' NC_NAME)
 	|	(BracedURILiteral '*');
+
 postfixExpr 
-	:	primaryExpr (predicate | argumentList)*;
+	:	primaryExpr
+	| 	postfixExpr predicate
+	| 	postfixExpr argumentList;
+
 argumentList 
-	:	'(' (argument (',' argument)*)? ')';
+	: 	'(' arguments ')'
+	|	'(' ')';
+
+arguments
+	: argument 
+	| arguments ',' argument;
+
 predicateList 
 	:	predicate*;
+
 predicate 
 	:	'[' expr ']';
+
 primaryExpr 
 	:	literal 
 	|	varRef
@@ -184,7 +198,9 @@ NumericLiteral
 	:	IntegerLiteral | DecimalLiteral | DoubleLiteral;
 
 parenthesizedExpr
-	:	'(' expr? ')';
+	: '(' ')'
+	| '(' expr ')';
+
 contextItemExpr 
 	:	'.';
 functionCall 

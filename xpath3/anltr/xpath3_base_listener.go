@@ -339,6 +339,12 @@ func (s *BaseXPath3Listener) EnterArgumentList(ctx *ArgumentListContext) {}
 // ExitArgumentList is called when production argumentList is exited.
 func (s *BaseXPath3Listener) ExitArgumentList(ctx *ArgumentListContext) {}
 
+// EnterArguments is called when production arguments is entered.
+func (s *BaseXPath3Listener) EnterArguments(ctx *ArgumentsContext) {}
+
+// ExitArguments is called when production arguments is exited.
+func (s *BaseXPath3Listener) ExitArguments(ctx *ArgumentsContext) {}
+
 // EnterPredicateList is called when production predicateList is entered.
 func (s *BaseXPath3Listener) EnterPredicateList(ctx *PredicateListContext) {}
 
